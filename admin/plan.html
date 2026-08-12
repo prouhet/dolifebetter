@@ -64,6 +64,7 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
   padding:15px 16px;margin-bottom:10px}
 .assigned-top{display:flex;align-items:center;justify-content:between;gap:10px}
 .assigned-name-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.chevron{color:var(--ink-faint);flex-shrink:0}
 .assigned-name-block{display:flex;align-items:center;gap:8px;min-width:0}
 .type-badge{width:22px;height:22px;border-radius:7px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
 .type-badge.yesno{background:var(--teal-tint);color:var(--teal-deep)}
@@ -238,7 +239,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         </div>
       </div>
 
-      <button class="save-btn" onclick="assignItem()">Assign to Jane</button>
+      <button class="save-btn" onclick="assignItem()"><span id="save-btn-label">Assign to Jane</span></button>
       <div class="cancel-link" onclick="showScreen('screen-plan')">Cancel</div>
     </div>
 
@@ -353,17 +354,20 @@ function scheduleHtml(a){
 function renderAssigned(){
   const list = document.getElementById('assigned-list');
   list.innerHTML = assigned.map((a, i) => `
-    <div class="assigned-card">
+    <div class="assigned-card" style="cursor:pointer" onclick="openEditAssignment('${a.assignmentId}')">
       <div class="assigned-name-row">
         <div class="assigned-name-block">
           <div class="type-badge ${a.type}">${typeIcon(a.type)}</div>
           <div class="assigned-name">${a.name}</div>
         </div>
-        ${goalBadgeHtml(a)}
+        <div style="display:flex;align-items:center;gap:8px">
+          ${goalBadgeHtml(a)}
+          <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" style="flex-shrink:0"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
       </div>
       ${scheduleHtml(a)}
       ${a.type === 'numeric' && a.history.length > 1 ? `
-        <div class="history-toggle" onclick="toggleHistory(${i})">📜 Goal history (${a.history.length})</div>
+        <div class="history-toggle" onclick="event.stopPropagation(); toggleHistory(${i})">📜 Goal history (${a.history.length})</div>
         <div class="history-panel hidden" id="history-${i}">
           ${a.history.map(h => `
             <div class="history-row ${h.to === 'now' ? 'current' : ''}">
@@ -385,11 +389,11 @@ let pendingItem = null;
 function openPicker(){
   const list = document.getElementById('picker-list');
   list.innerHTML = LIBRARY.map(item => {
-    const already = assigned.some(a => a.libId === item.id);
+    const existing = assigned.find(a => a.libId === item.id);
     return `
-      <div class="picker-item ${already ? 'already' : ''}" onclick="pickItem('${item.id}')">
+      <div class="picker-item ${existing ? 'already' : ''}" onclick="${existing ? `openEditAssignment('${existing.assignmentId}')` : `pickItem('${item.id}')`}">
         <div class="picker-icon ${item.type}">${typeIcon(item.type)}</div>
-        <div class="picker-name">${item.name}${already ? ' — already assigned' : ''}</div>
+        <div class="picker-name">${item.name}${existing ? ' — already assigned, tap to edit' : ''}</div>
         <div class="picker-check"></div>
       </div>
     `;
@@ -399,10 +403,13 @@ function openPicker(){
 
 let weeklyCount = 3;
 let lastInputStyle = 'slider'; // remembers this trainer's last choice across assignments
+let editingAssignmentId = null; // set when editing an existing assignment, null when adding new
 
 function pickItem(id){
+  editingAssignmentId = null;
   pendingItem = LIBRARY.find(l => l.id === id);
   document.getElementById('config-heading').textContent = `Set ${CLIENT.name.split(' ')[0]}'s plan`;
+  document.getElementById('save-btn-label').textContent = `Assign to ${CLIENT.name.split(' ')[0]}`;
   document.getElementById('goal-row').classList.toggle('hidden', pendingItem.type !== 'numeric');
   document.getElementById('input-style-row').classList.toggle('hidden', pendingItem.type !== 'numeric');
   document.getElementById('target-row').classList.toggle('hidden', pendingItem.type !== 'yesno');
@@ -410,12 +417,39 @@ function pickItem(id){
   document.getElementById('goal-input').value = '';
   document.getElementById('target-input').value = '';
   document.querySelectorAll('#input-style-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.style === lastInputStyle));
-  // Reset schedule mode to "specific days" each time
   document.querySelectorAll('#mode-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.mode === 'days'));
+  document.querySelectorAll('.day-pick').forEach(d => d.classList.toggle('on', ['Mon','Tue','Wed','Thu','Fri'].includes(d.dataset.d)));
   document.getElementById('days-row').classList.remove('hidden');
   document.getElementById('weekly-row').classList.add('hidden');
   weeklyCount = 3;
   document.getElementById('weekly-val').textContent = weeklyCount;
+  updateLoadWarning();
+  showScreen('screen-config');
+}
+
+function openEditAssignment(assignmentId){
+  const a = assigned.find(x => x.assignmentId === assignmentId);
+  if(!a) return;
+  editingAssignmentId = assignmentId;
+  pendingItem = LIBRARY.find(l => l.id === a.libId);
+  document.getElementById('config-heading').textContent = `Edit ${CLIENT.name.split(' ')[0]}'s ${a.name}`;
+  document.getElementById('save-btn-label').textContent = 'Save Changes';
+  document.getElementById('goal-row').classList.toggle('hidden', a.type !== 'numeric');
+  document.getElementById('input-style-row').classList.toggle('hidden', a.type !== 'numeric');
+  document.getElementById('target-row').classList.toggle('hidden', a.type !== 'yesno');
+  document.getElementById('goal-unit').textContent = a.unit || '';
+  document.getElementById('goal-input').value = a.goal != null ? a.goal : '';
+  document.getElementById('target-input').value = a.goalLabel || '';
+  document.querySelectorAll('#input-style-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.style === (a.inputStyle||lastInputStyle)));
+
+  const isWeekly = a.scheduleType === 'weekly';
+  document.querySelectorAll('#mode-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.mode === a.scheduleType));
+  document.getElementById('days-row').classList.toggle('hidden', isWeekly);
+  document.getElementById('weekly-row').classList.toggle('hidden', !isWeekly);
+  document.querySelectorAll('.day-pick').forEach(d => d.classList.toggle('on', (a.days||[]).includes(d.dataset.d)));
+  weeklyCount = a.weeklyCount || 3;
+  document.getElementById('weekly-val').textContent = weeklyCount;
+
   updateLoadWarning();
   showScreen('screen-config');
 }
@@ -491,15 +525,27 @@ async function assignItem(){
     schedule_type: scheduleType, days: scheduleType==='days' ? days : null,
     weekly_count: scheduleType==='weekly' ? weeklyCount : null
   };
+
   try {
-    await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
+    if(editingAssignmentId){
+      // Never overwrite the old row in place — close it out with today's date, then
+      // open a fresh row. This is exactly what makes goal history real: each change
+      // becomes its own entry instead of erasing what came before.
+      const today = new Date().toISOString().slice(0,10);
+      await sbReq(`checkin_assignments?id=eq.${editingAssignmentId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({effective_to: today})});
+      await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
+    } else {
+      await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
+    }
   } catch(e){
-    showToast('✗ Could not assign — try again');
+    showToast('✗ Could not save — try again');
     return;
   }
+  const wasEditing = !!editingAssignmentId;
+  editingAssignmentId = null;
   await init();
   showScreen('screen-plan');
-  showToast(`✓ Assigned to ${CLIENT.name.split(' ')[0]}`);
+  showToast(wasEditing ? '✓ Changes saved' : `✓ Assigned to ${CLIENT.name.split(' ')[0]}`);
 }
 
 init();
