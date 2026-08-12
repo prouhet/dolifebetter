@@ -159,7 +159,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
 
     <!-- SCREEN: CLIENT PLAN -->
     <div id="screen-plan">
-      <div class="back-link" onclick="window.location.href='index.html'">← Back to clients</div>
+      <div class="back-link" onclick="window.location.href='index.html?id=' + TRAINER_TOKEN">← Back to clients</div>
 
       <div class="client-head">
         <div class="client-avatar" id="client-avatar"></div>
@@ -276,6 +276,7 @@ function fmtDate(iso){
 }
 
 const CLIENT_ID = new URLSearchParams(window.location.search).get('id');
+const TRAINER_TOKEN = new URLSearchParams(window.location.search).get('t') || '';
 let CLIENT = null;
 let LIBRARY = [];
 let assigned = [];
