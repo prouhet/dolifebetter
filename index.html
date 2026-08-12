@@ -350,7 +350,7 @@ function todayISO(){ return new Date().toISOString().slice(0,10); }
 
 // ─── Init ──────────────────────────────────────────────────────────────────
 async function init(){
-  if(!CLIENT_TOKEN){ showScreen('screen-error'); return; }
+  if(!CLIENT_TOKEN){ window.location.href = 'get-started.html'; return; }
   let rows;
   try {
     rows = await sbReq(`checkin_clients?select=id,name,token,checkin_trainers(id,name),checkin_orgs(name)&token=eq.${encodeURIComponent(CLIENT_TOKEN)}`);
