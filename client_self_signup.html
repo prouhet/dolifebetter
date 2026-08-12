@@ -111,6 +111,10 @@ input::placeholder{color:var(--ink-faint)}
     <div class="page-title">Let's get you set up</div>
     <div class="page-sub">A couple quick things, then we'll have your trainer take it from here.</div>
 
+    <div style="background:var(--teal-tint);border-radius:14px;padding:14px 16px;margin-bottom:22px;font-size:13px;color:var(--ink-dim);line-height:1.55">
+      🌱 No grading, no judgment — this is just about honestly logging inputs. What you do each day leads somewhere whether you track it or not. This just makes sure what you're tracking is pointed at the life you actually want, with a real trainer helping you pick the right things.
+    </div>
+
     <div class="field-block">
       <div class="field-label">Your name</div>
       <input type="text" id="signup-name" placeholder="e.g. Kim Delgado">
@@ -141,7 +145,19 @@ input::placeholder{color:var(--ink-faint)}
     <button class="cta" onclick="goToReview()">Continue</button>
   </div>
 
-  <!-- SCREEN 3: REVIEW -->
+  <!-- SCREEN 4: SUGGEST SOMETHING NOT LISTED -->
+  <div id="screen-suggest" class="screen hidden">
+    <div class="back-link" onclick="showScreen('screen-dids')">← Back</div>
+    <div class="page-title">Tell us what you have in mind</div>
+    <div class="page-sub">Say it or type it — your trainer will help turn it into something trackable.</div>
+    <textarea id="suggest-text" placeholder="e.g. I want to cut back on late-night snacking…" style="width:100%;min-height:110px;border-radius:14px;border:1.5px solid var(--surface-soft);background:var(--surface);padding:14px 16px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);outline:none;resize:none;margin-bottom:12px"></textarea>
+    <button class="mic-btn" id="suggest-mic-btn" onclick="toggleMic()" style="width:44px;height:44px;border-radius:50%;background:var(--surface);border:1.5px solid var(--surface-soft);color:var(--ink-dim);cursor:pointer;display:flex;align-items:center;justify-content:center;margin-bottom:16px">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+    </button>
+    <button class="cta" onclick="addSuggestionAndContinue()">Add this</button>
+  </div>
+
+  <!-- SCREEN 5: REVIEW -->
   <div id="screen-review" class="screen hidden">
     <div class="step-dots"><div class="step-dot done"></div><div class="step-dot done"></div><div class="step-dot active"></div></div>
     <div class="back-link" onclick="showScreen('screen-dids')">← Back</div>
@@ -158,6 +174,14 @@ input::placeholder{color:var(--ink-faint)}
     </div>
 
     <button class="cta" onclick="submitSignup()">Send to a Trainer</button>
+  </div>
+
+  <!-- INFO TOOLTIP MODAL -->
+  <div id="info-modal" class="hidden" style="position:fixed;inset:0;background:rgba(10,18,21,.5);display:flex;align-items:flex-end;justify-content:center;z-index:40" onclick="if(event.target===this) closeInfoModal()">
+    <div style="width:100%;max-width:440px;background:var(--surface);border-radius:20px 20px 0 0;padding:22px 20px 30px;box-shadow:var(--shadow-md)">
+      <div id="info-modal-name" style="font-size:16px;font-weight:700;margin-bottom:8px"></div>
+      <div id="info-modal-text" style="font-size:14px;color:var(--ink-dim);line-height:1.55"></div>
+    </div>
   </div>
 
   <!-- SCREEN 4: SENT -->
@@ -178,9 +202,10 @@ function toggleTheme(){applyTheme(!document.body.classList.contains('dark'));}
 applyTheme(false);
 
 function showScreen(id){
-  ['screen-info','screen-dids','screen-review','screen-sent'].forEach(s => {
+  ['screen-info','screen-dids','screen-suggest','screen-review','screen-sent'].forEach(s => {
     document.getElementById(s).classList.toggle('hidden', s!==id);
   });
+  window.scrollTo(0,0);
 }
 
 document.getElementById('signup-name').addEventListener('input', checkInfoValid);
@@ -189,36 +214,95 @@ function checkInfoValid(){
   const ok = document.getElementById('signup-name').value.trim() && document.getElementById('signup-phone').value.trim();
   document.getElementById('info-next-btn').disabled = !ok;
 }
+let selectedOrgSrc = 'strong';
 document.getElementById('signup-source').addEventListener('click', e => {
   const opt = e.target.closest('.pill-opt'); if(!opt) return;
   document.querySelectorAll('#signup-source .pill-opt').forEach(o => o.classList.toggle('selected', o===opt));
+  selectedOrgSrc = opt.dataset.src;
 });
 
-const DID_CATALOG = [
-  {id:'wake', category:'Sleep', emoji:'🌙', name:'Consistent wake time', type:'yesno'},
-  {id:'sleep', category:'Sleep', emoji:'🌙', name:'Sleep duration', type:'numeric'},
-  {id:'light', category:'Sleep', emoji:'🌙', name:'Morning light exposure', type:'yesno'},
-  {id:'protein', category:'Food', emoji:'🍎', name:'Protein intake', type:'numeric'},
-  {id:'supplements', category:'Food', emoji:'🍎', name:'Took supplements', type:'yesno'},
-  {id:'steps', category:'Move', emoji:'🏃', name:'Daily steps (NEAT)', type:'numeric'},
-  {id:'training', category:'Move', emoji:'🏃', name:'Resistance training session', type:'yesno'},
-  {id:'gratitude', category:'Zen', emoji:'🧘', name:'Gratitude', type:'reflection'}
-];
+// ─── Real config ──────────────────────────────────────────────────────────
+const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
+const SBH = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
+async function sbReq(path, opts = {}) {
+  const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...opts, headers: { ...SBH, ...opts.headers } });
+  if (!r.ok) throw new Error(await r.text());
+  const text = await r.text();
+  return text ? JSON.parse(text) : null;
+}
+const CHECKIN_VOICE_KEY = "53bd219ac2f1d35e229f27e17312f3e0f716b0b6";
+const CATEGORY_EMOJI = { Sleep:'🌙', Food:'🍎', Move:'🏃', Zen:'🧘' };
+const FALLBACK_EMOJI = '📋';
+
+let orgLookup = {}; // 'strong'/'premier' -> real org id
+let DID_CATALOG = [];
 let selectedDids = [];
+let selectedOrgId = null;
+let suggestionText = null; // holds a client-typed suggestion if they add one
+
+const orgsLoadedPromise = (async () => {
+  try {
+    const rows = await sbReq('checkin_orgs?select=id,name');
+    rows.forEach(o => {
+      if(/premier/i.test(o.name)) orgLookup.premier = o.id;
+      else if(/studio strong/i.test(o.name)) orgLookup.strong = o.id;
+    });
+  } catch(e){ /* selectedOrgId just falls back to null if this never resolves */ }
+})();
+
+async function goToDids(){
+  await orgsLoadedPromise; // make sure orgLookup is actually populated before reading it —
+  // a fast click-through could otherwise reach here before the org fetch above finishes.
+  selectedOrgId = orgLookup[selectedOrgSrc] || null;
+  document.getElementById('dids-list').innerHTML = `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Loading…</div>`;
+  showScreen('screen-dids');
+
+  let rows = [];
+  try {
+    // Shared items (org_id is null) plus anything specific to this org — this is what
+    // makes Premier U's real, much larger clinical catalog show only for Premier U
+    // sign-ups, while Studio Strong's simpler catalog stays the default everywhere else.
+    const filter = selectedOrgId ? `or=(org_id.is.null,org_id.eq.${selectedOrgId})` : 'org_id=is.null';
+    rows = await sbReq(`checkin_library_items?select=*&${filter}&order=category`);
+  } catch(e){
+    // org_id column may not exist yet on an older schema — fall back to the full shared catalog
+    try { rows = await sbReq('checkin_library_items?select=*&order=category'); } catch(e2){ rows = []; }
+  }
+  DID_CATALOG = rows.map(r => ({
+    id:r.id, category:r.category, subCategory:r.sub_category||null,
+    emoji: CATEGORY_EMOJI[r.category] || FALLBACK_EMOJI,
+    name:r.name, type:r.type, question:r.question
+  }));
+  renderDidsList();
+}
 
 function renderDidsList(){
   let html = '', lastCat = null;
   DID_CATALOG.forEach(item => {
     if(item.category !== lastCat){ html += `<div class="cat-header">${item.emoji} ${item.category}</div>`; lastCat = item.category; }
-    html += `<div class="did-check-row" data-did="${item.id}" onclick="toggleDid('${item.id}')">
-      <div class="did-icon ${item.type}">${item.type === 'yesno' ? '✓' : item.type === 'reflection' ? '💬' : '#'}</div>
-      <div class="did-check-name">${item.name}</div>
-      <div class="did-checkbox"></div>
+    html += `<div class="did-check-row" data-did="${item.id}">
+      <div class="did-icon ${item.type}" onclick="toggleDid('${item.id}')">${item.type === 'yesno' ? '✓' : item.type === 'reflection' ? '💬' : '#'}</div>
+      <div class="did-check-name" onclick="toggleDid('${item.id}')">${item.name}</div>
+      <div class="info-icon" onclick="event.stopPropagation(); showInfoModal('${item.id}')" style="width:22px;height:22px;border-radius:50%;border:1.5px solid var(--surface-soft);color:var(--ink-faint);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;cursor:pointer;margin-right:8px">i</div>
+      <div class="did-checkbox" onclick="toggleDid('${item.id}')"></div>
     </div>`;
   });
+  html += `<div class="did-check-row" style="border-style:dashed" onclick="showScreen('screen-suggest')">
+    <div class="did-icon reflection">💬</div>
+    <div class="did-check-name">None of these — tell us what you have in mind</div>
+  </div>`;
   document.getElementById('dids-list').innerHTML = html;
 }
-renderDidsList();
+
+function showInfoModal(id){
+  const item = DID_CATALOG.find(d => d.id === id);
+  if(!item) return;
+  document.getElementById('info-modal-name').textContent = item.name;
+  document.getElementById('info-modal-text').textContent = item.question || "Your trainer can explain more about this one.";
+  document.getElementById('info-modal').classList.remove('hidden');
+}
+function closeInfoModal(){ document.getElementById('info-modal').classList.add('hidden'); }
 
 function toggleDid(id){
   const row = document.querySelector(`.did-check-row[data-did="${id}"]`);
@@ -229,17 +313,84 @@ function toggleDid(id){
     : "Nothing picked yet — that's okay too, a trainer can help you choose";
 }
 
-function goToDids(){ showScreen('screen-dids'); }
+// ─── Suggest something not listed — same real voice mechanism used elsewhere ──
+let mediaRecorder = null, audioChunks = [], isRecording = false;
+function getBestMimeType(){
+  const types = ['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm','audio/ogg','audio/mp4'];
+  for(const t of types){ try{ if(MediaRecorder.isTypeSupported(t)) return t; }catch(e){} }
+  return '';
+}
+async function toggleMic(){
+  const btn = document.getElementById('suggest-mic-btn');
+  if(isRecording){ mediaRecorder?.stop(); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch(e){ alert('Microphone access denied — you can still type instead.'); return; }
+  audioChunks = [];
+  const mimeType = getBestMimeType();
+  try { mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream); }
+  catch(e){ try { mediaRecorder = new MediaRecorder(stream); } catch(e2){ alert('Recording not supported on this device.'); stream.getTracks().forEach(t=>t.stop()); return; } }
+  const actualMime = mediaRecorder.mimeType || mimeType || 'audio/webm';
+  mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.onstop = async () => {
+    isRecording = false; btn.classList.remove('recording');
+    stream.getTracks().forEach(t => t.stop());
+    const blob = new Blob(audioChunks, { type: actualMime });
+    if(blob.size < 1000) return;
+    btn.classList.add('processing');
+    try {
+      const res = await fetch(`${SB_URL}/functions/v1/transcribe?key=${encodeURIComponent(CHECKIN_VOICE_KEY)}`,
+        { method:'POST', headers:{ 'Content-Type': actualMime }, body: blob });
+      if(!res.ok) throw new Error('Transcribe ' + res.status);
+      const data = await res.json();
+      const transcript = (data.transcript || '').trim();
+      if(transcript){
+        const ta = document.getElementById('suggest-text');
+        ta.value = ta.value.trim() ? ta.value.trim() + ' ' + transcript : transcript;
+      }
+    } catch(e){ /* silent — they can still type */ }
+    finally { btn.classList.remove('processing'); }
+  };
+  mediaRecorder.start(250);
+  isRecording = true;
+  btn.classList.add('recording');
+}
+function addSuggestionAndContinue(){
+  const text = document.getElementById('suggest-text').value.trim();
+  if(text) suggestionText = text;
+  showScreen('screen-dids');
+}
 
 function goToReview(){
   document.getElementById('review-name').textContent = document.getElementById('signup-name').value.trim();
   document.getElementById('review-phone').textContent = document.getElementById('signup-phone').value.trim();
   const names = DID_CATALOG.filter(d => selectedDids.includes(d.id)).map(d => d.name);
+  if(suggestionText) names.push(`"${suggestionText}"`);
   document.getElementById('review-dids').textContent = names.length ? names.join(', ') : 'Open to suggestions';
   showScreen('screen-review');
 }
 
-function submitSignup(){
+async function submitSignup(){
+  const name = document.getElementById('signup-name').value.trim();
+  const phone = document.getElementById('signup-phone').value.trim();
+  const note = suggestionText ? `Also interested in (their own words): ${suggestionText}` : null;
+
+  try {
+    await sbReq('checkin_signups', { method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({
+      name, phone, org_id: selectedOrgId, requested_item_ids: selectedDids.length ? selectedDids : null,
+      status: 'pending'
+    }) });
+  } catch(e){
+    // Older schema without requested_item_ids typing, or note field missing — try a safer minimal payload
+    try {
+      await sbReq('checkin_signups', { method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({
+        name, phone, org_id: selectedOrgId, status: 'pending'
+      }) });
+    } catch(e2){
+      alert('Something went wrong sending that — try again in a moment.');
+      return;
+    }
+  }
   showScreen('screen-sent');
 }
 </script>
