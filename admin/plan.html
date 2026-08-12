@@ -158,16 +158,13 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
 
     <!-- SCREEN: CLIENT PLAN -->
     <div id="screen-plan">
-      <div class="back-link">← Back to clients</div>
+      <div class="back-link" onclick="window.location.href='index.html'">← Back to clients</div>
 
       <div class="client-head">
-        <div class="client-avatar">J</div>
+        <div class="client-avatar" id="client-avatar"></div>
         <div>
-          <div class="client-name">Jane Whitfield</div>
-          <div class="client-meta">
-            <span class="badge premier">Premier U</span>
-            <span>· Trainer: Doreen</span>
-          </div>
+          <div class="client-name" id="client-name"></div>
+          <div class="client-meta" id="client-meta"></div>
         </div>
       </div>
 
@@ -261,41 +258,76 @@ function showScreen(id){
   });
 }
 
-const LIBRARY = [
-  {id:"protein", name:"Protein intake", type:"numeric", unit:"g"},
-  {id:"wake", name:"Consistent wake time", type:"yesno", unit:null},
-  {id:"sleep", name:"Sleep duration", type:"numeric", unit:"hrs"},
-  {id:"light", name:"Morning light exposure", type:"yesno", unit:null},
-  {id:"steps", name:"Daily steps (NEAT)", type:"numeric", unit:"steps"},
-  {id:"training", name:"Resistance training session", type:"yesno", unit:null},
-  {id:"supplements", name:"Took supplements", type:"yesno", unit:null},
-  {id:"gratitude", name:"Gratitude", type:"reflection", unit:null}
-];
+// ─── Real config — same pattern as everywhere else in this build ───────────
+const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
+const SBH = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
+async function sbReq(path, opts = {}) {
+  const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...opts, headers: { ...SBH, ...opts.headers } });
+  if (!r.ok) throw new Error(await r.text());
+  const text = await r.text();
+  return text ? JSON.parse(text) : null;
+}
+function fmtDate(iso){
+  if(!iso) return 'now';
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+}
 
-// Assigned items for this client, each with a current goal + full goal history.
-// History is never overwritten — a new goal just closes out the old one with an end date.
-// scheduleType 'days' = specific days shown as chips; 'weekly' = flexible, any N days that add up.
-let assigned = [
-  {
-    libId:"protein", name:"Protein intake", type:"numeric", unit:"g", goal:75,
-    scheduleType:"days", days:["Mon","Tue","Wed","Thu","Fri"],
-    history:[
-      {goal:60, from:"Apr 1", to:"May 12"},
-      {goal:65, from:"May 12", to:"Jun 30"},
-      {goal:75, from:"Jun 30", to:"now"}
-    ]
-  },
-  {
-    libId:"wake", name:"Consistent wake time", type:"yesno", unit:null, goalLabel:"6:30 AM",
-    scheduleType:"days", days:["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],
-    history:[{goal:null, from:"Apr 1", to:"now"}]
-  },
-  {
-    libId:"training", name:"Resistance training session", type:"yesno", unit:null, goalLabel:"45 min",
-    scheduleType:"weekly", weeklyCount:3, days:["Mon","Wed","Fri"],
-    history:[{goal:null, from:"May 5", to:"now"}]
+const CLIENT_ID = new URLSearchParams(window.location.search).get('id');
+let CLIENT = null;
+let LIBRARY = [];
+let assigned = [];
+
+async function init(){
+  if(!CLIENT_ID){
+    document.getElementById('client-name').textContent = 'No client specified';
+    return;
   }
-];
+  let clientRows, libRows, assignRows;
+  try {
+    [clientRows, libRows, assignRows] = await Promise.all([
+      sbReq(`checkin_clients?select=*,checkin_trainers(name,max_dids_per_day),checkin_orgs(name)&id=eq.${CLIENT_ID}`),
+      sbReq(`checkin_library_items?select=*&order=category`),
+      sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT_ID}&order=effective_from`)
+    ]);
+  } catch(e){
+    document.getElementById('client-name').textContent = 'Could not load — check connection';
+    return;
+  }
+  if(!clientRows || !clientRows.length){
+    document.getElementById('client-name').textContent = 'Client not found';
+    return;
+  }
+  CLIENT = clientRows[0];
+  LIBRARY = (libRows||[]).map(r => ({id:r.id, name:r.name, type:r.type, unit:r.unit, minValue:r.min_value, maxValue:r.max_value, category:r.category}));
+
+  // Group all assignment rows (past + current) by library item to reconstruct full goal history —
+  // history lives across multiple rows, distinguished by effective_from/effective_to, never
+  // overwritten in place.
+  const byItem = {};
+  (assignRows||[]).forEach(r => {
+    const itemId = r.checkin_library_items.id;
+    if(!byItem[itemId]) byItem[itemId] = [];
+    byItem[itemId].push(r);
+  });
+  assigned = Object.values(byItem).map(rows => {
+    const current = rows.find(r => !r.effective_to) || rows[rows.length-1];
+    const item = current.checkin_library_items;
+    return {
+      assignmentId: current.id, libId: item.id, name: item.name, type: item.type, unit: item.unit,
+      goal: current.goal, goalLabel: current.goal_label, inputStyle: current.input_style,
+      scheduleType: current.schedule_type, days: current.days||[], weeklyCount: current.weekly_count,
+      history: rows.map(r => ({goal: r.goal, from: fmtDate(r.effective_from), to: r.effective_to ? fmtDate(r.effective_to) : 'now'}))
+    };
+  });
+
+  document.getElementById('client-avatar').textContent = CLIENT.name[0];
+  document.getElementById('client-name').textContent = CLIENT.name;
+  document.getElementById('client-meta').innerHTML = `<span class="badge premier">${CLIENT.checkin_orgs?.name||'—'}</span><span>· Trainer: ${CLIENT.checkin_trainers?.name||'—'}</span>`;
+
+  renderAssigned();
+}
 
 function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : '#'; }
 
@@ -307,7 +339,7 @@ function goalBadgeHtml(a){
 
 function scheduleHtml(a){
   if(a.scheduleType === 'weekly'){
-    return `<div class="freq-label">📅 ${a.weeklyCount}x per week — Jane's choice of days</div>`;
+    return `<div class="freq-label">📅 ${a.weeklyCount}x per week — ${CLIENT.name.split(' ')[0]}'s choice of days</div>`;
   }
   return `
     <div class="assigned-days">
@@ -344,8 +376,6 @@ function renderAssigned(){
     </div>
   `).join('');
 }
-renderAssigned();
-
 function toggleHistory(i){
   document.getElementById('history-' + i).classList.toggle('hidden');
 }
@@ -372,7 +402,7 @@ let lastInputStyle = 'slider'; // remembers this trainer's last choice across as
 
 function pickItem(id){
   pendingItem = LIBRARY.find(l => l.id === id);
-  document.getElementById('config-heading').textContent = "Set Jane's plan";
+  document.getElementById('config-heading').textContent = `Set ${CLIENT.name.split(' ')[0]}'s plan`;
   document.getElementById('goal-row').classList.toggle('hidden', pendingItem.type !== 'numeric');
   document.getElementById('input-style-row').classList.toggle('hidden', pendingItem.type !== 'numeric');
   document.getElementById('target-row').classList.toggle('hidden', pendingItem.type !== 'yesno');
@@ -390,9 +420,9 @@ function pickItem(id){
   showScreen('screen-config');
 }
 
-// Doreen's own preference, set on her trainer profile — in production this reads from
-// wherever trainer settings live (see checkin_admin_master.html), not hardcoded per file.
-const TRAINER_MAX_DIDS = 3;
+// This trainer's own preference, read from their real profile — set on the preferences
+// screen in the master admin tool, not hardcoded per file.
+function trainerMaxDids(){ return CLIENT?.checkin_trainers?.max_dids_per_day || 3; }
 
 function currentDailyLoad(){
   const counts = {Mon:0,Tue:0,Wed:0,Thu:0,Fri:0,Sat:0,Sun:0};
@@ -410,10 +440,12 @@ function updateLoadWarning(){
   if(isWeekly){ warningEl.classList.add('hidden'); return; } // flexible schedule — no fixed day to check
   const selectedDays = Array.from(document.querySelectorAll('.day-pick.on')).map(d => d.dataset.d);
   const load = currentDailyLoad();
-  const overLimit = selectedDays.filter(d => (load[d] + 1) > TRAINER_MAX_DIDS);
+  const maxDids = trainerMaxDids();
+  const overLimit = selectedDays.filter(d => (load[d] + 1) > maxDids);
   if(overLimit.length){
     const worst = Math.max(...overLimit.map(d => load[d] + 1));
-    warningEl.textContent = `⚠️ This puts Jane at ${worst} dids on ${overLimit.join(', ')} — Doreen recommends ${TRAINER_MAX_DIDS}. You can still assign it if it makes sense here.`;
+    const trainerFirst = (CLIENT.checkin_trainers?.name || 'Your trainer').split(' ')[0];
+    warningEl.textContent = `⚠️ This puts ${CLIENT.name.split(' ')[0]} at ${worst} dids on ${overLimit.join(', ')} — ${trainerFirst} recommends ${maxDids}. You can still assign it if it makes sense here.`;
     warningEl.classList.remove('hidden');
   } else {
     warningEl.classList.add('hidden');
@@ -445,23 +477,32 @@ function stepWeekly(delta){
   document.getElementById('weekly-val').textContent = weeklyCount;
 }
 
-function assignItem(){
+async function assignItem(){
   const scheduleType = document.querySelector('#mode-toggle .mode-opt.selected').dataset.mode;
   const days = Array.from(document.querySelectorAll('.day-pick.on')).map(d => d.dataset.d);
   const goal = pendingItem.type === 'numeric' ? parseInt(document.getElementById('goal-input').value || '0', 10) : null;
   const goalLabel = pendingItem.type === 'yesno' ? (document.getElementById('target-input').value.trim() || null) : null;
   const inputStyle = pendingItem.type === 'numeric' ? document.querySelector('#input-style-toggle .mode-opt.selected').dataset.style : null;
   if(inputStyle) lastInputStyle = inputStyle;
-  assigned.push({
-    libId: pendingItem.id, name: pendingItem.name, type: pendingItem.type, unit: pendingItem.unit,
-    goal: goal, goalLabel: goalLabel, inputStyle: inputStyle,
-    scheduleType: scheduleType, days: days, weeklyCount: weeklyCount,
-    history: [{goal: goal, from: "Today", to: "now"}]
-  });
-  renderAssigned();
+
+  const payload = {
+    client_id: CLIENT.id, library_item_id: pendingItem.id,
+    goal, goal_label: goalLabel, input_style: inputStyle,
+    schedule_type: scheduleType, days: scheduleType==='days' ? days : null,
+    weekly_count: scheduleType==='weekly' ? weeklyCount : null
+  };
+  try {
+    await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
+  } catch(e){
+    showToast('✗ Could not assign — try again');
+    return;
+  }
+  await init();
   showScreen('screen-plan');
-  showToast('✓ Assigned to Jane');
+  showToast(`✓ Assigned to ${CLIENT.name.split(' ')[0]}`);
 }
+
+init();
 
 function showToast(msg){
   const t = document.getElementById('toast');

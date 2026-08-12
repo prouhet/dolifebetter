@@ -624,7 +624,7 @@ function clientRowHtml(c){
   const t = trainerOf(c.trainerId);
   const shortLink = BASE_URL.replace('https://','') + '?id=' + c.token;
   return `
-    <div class="client-row" onclick="openClientToast('${c.name}')">
+    <div class="client-row" onclick="window.location.href='plan.html?id=${c.id}'">
       <div class="client-avatar">${c.name[0]}</div>
       <div class="client-body">
         <div class="client-name">${c.name}</div>
@@ -677,7 +677,7 @@ function closeNoteModal(){
 
 function rosterRowHtml(c){
   return `
-    <div class="client-row" onclick="openClientToast('${c.name}')" style="display:block">
+    <div class="client-row" onclick="window.location.href='plan.html?id=${c.id}'" style="display:block">
       <div style="display:flex;align-items:center;gap:12px">
         <div class="client-avatar">${c.name[0]}</div>
         <div class="client-body">
@@ -849,7 +849,7 @@ function requestCardHtml(r){
       ${r.note ? `<div class="request-note">"${r.note}"</div>` : ''}
       <div class="request-actions">
         <div class="request-btn" onclick="markHandled('${r.id}')">Mark handled</div>
-        <div class="request-btn primary" onclick="openClientToast('${clientName}')">Open plan</div>
+        <div class="request-btn primary" onclick="window.location.href='plan.html?id=${r.client_id}'">Open plan</div>
       </div>
     </div>`;
 }
