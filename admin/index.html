@@ -168,6 +168,8 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
 .did-cat-header:first-child{margin-top:0}
 .did-check-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:11px;border:1.5px solid var(--surface-soft);
   background:var(--surface);cursor:pointer;margin-bottom:6px;transition:all .15s ease}
+.new-did-toggle{font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer;margin-top:10px;padding:4px 2px;display:inline-block}
+.new-did-toggle:hover{text-decoration:underline}
 .did-check-row.selected{border-color:var(--teal);background:var(--teal-tint)}
 .did-checkbox{width:18px;height:18px;border-radius:6px;border:1.5px solid var(--surface-soft);flex-shrink:0;position:relative}
 .did-check-row.selected .did-checkbox{background:var(--teal);border-color:var(--teal)}
@@ -415,6 +417,33 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div class="field-block">
         <div class="field-label">Starting dids <span style="font-weight:400;color:var(--ink-faint)">— optional, add more anytime</span></div>
         <div id="new-client-dids"></div>
+        <div class="new-did-toggle" onclick="toggleNewDidForm()" id="new-did-toggle">+ Create a new did</div>
+        <div id="new-did-form" class="hidden" style="margin-top:12px;padding:16px;border-radius:14px;background:var(--surface);border:1px solid var(--surface-soft)">
+          <div class="field-label">Category</div>
+          <div class="trainer-select" id="new-did-category" style="margin-bottom:14px">
+            <div class="trainer-opt selected" data-cat="Sleep" onclick="pickNewDidCategory(this)">🌙 Sleep</div>
+            <div class="trainer-opt" data-cat="Food" onclick="pickNewDidCategory(this)">🍎 Food</div>
+            <div class="trainer-opt" data-cat="Move" onclick="pickNewDidCategory(this)">🏃 Move</div>
+            <div class="trainer-opt" data-cat="Zen" onclick="pickNewDidCategory(this)">🧘 Zen</div>
+          </div>
+          <div class="field-label">Name</div>
+          <input type="text" id="new-did-name" placeholder="e.g. Evening walk" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);margin-bottom:14px;outline:none">
+          <div class="field-label">Type</div>
+          <div class="trainer-select" id="new-did-type" style="margin-bottom:14px">
+            <div class="trainer-opt selected" data-type="yesno" onclick="pickNewDidType(this)">Yes/No</div>
+            <div class="trainer-opt" data-type="numeric" onclick="pickNewDidType(this)">Numeric</div>
+            <div class="trainer-opt" data-type="reflection" onclick="pickNewDidType(this)">Talk/type</div>
+          </div>
+          <div id="new-did-numeric-fields" class="hidden">
+            <div class="field-label">Unit</div>
+            <input type="text" id="new-did-unit" placeholder="e.g. g, hrs, steps" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);margin-bottom:14px;outline:none">
+            <div style="display:flex;gap:10px;margin-bottom:14px">
+              <div style="flex:1"><div class="field-label">Min</div><input type="number" id="new-did-min" value="0" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);outline:none"></div>
+              <div style="flex:1"><div class="field-label">Max</div><input type="number" id="new-did-max" value="100" style="width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);outline:none"></div>
+            </div>
+          </div>
+          <div class="add-btn" onclick="createNewDid()" style="text-align:center;cursor:pointer">＋ Add to catalog</div>
+        </div>
       </div>
       <button class="save-btn" onclick="addClient()">Add Client</button>
       <div class="cancel-link" onclick="showScreen('screen-master')">Cancel</div>
@@ -569,7 +598,7 @@ async function computeClientDayData(client){
 async function loadRealData(){
   const [rawTrainers, rawOrgs, rawClients] = await Promise.all([
     sbReq('checkin_trainers?select=*&order=name'),
-    sbReq('checkin_orgs?select=*&order=name'),
+    sbReq('checkin_orgs?select=*&order=is_default.desc,name.asc'),
     sbReq('checkin_clients?select=id,name,phone,org_id,trainer_id,token&order=name'),
   ]);
 
@@ -985,6 +1014,54 @@ function toggleDid(id){
   const row = document.querySelector(`.did-check-row[data-did="${id}"]`);
   const on = row.classList.toggle('selected');
   if(on) selectedDids.push(id); else selectedDids = selectedDids.filter(d => d !== id);
+}
+
+function toggleNewDidForm(){
+  const form = document.getElementById('new-did-form');
+  const isHidden = form.classList.contains('hidden');
+  form.classList.toggle('hidden');
+  document.getElementById('new-did-toggle').textContent = isHidden ? '− Cancel new did' : '+ Create a new did';
+}
+function pickNewDidCategory(el){
+  document.querySelectorAll('#new-did-category .trainer-opt').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+}
+function pickNewDidType(el){
+  document.querySelectorAll('#new-did-type .trainer-opt').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('new-did-numeric-fields').classList.toggle('hidden', el.dataset.type !== 'numeric');
+}
+async function createNewDid(){
+  const category = document.querySelector('#new-did-category .trainer-opt.selected').dataset.cat;
+  const name = document.getElementById('new-did-name').value.trim();
+  if(!name){ showToast('✗ Give it a name first'); return; }
+  const type = document.querySelector('#new-did-type .trainer-opt.selected').dataset.type;
+  const isNumeric = type === 'numeric';
+  const unit = isNumeric ? (document.getElementById('new-did-unit').value.trim() || null) : null;
+  const minValue = isNumeric ? parseFloat(document.getElementById('new-did-min').value || '0') : null;
+  const maxValue = isNumeric ? parseFloat(document.getElementById('new-did-max').value || '100') : null;
+
+  let newItem;
+  try {
+    const rows = await sbReq('checkin_library_items', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify({
+      category, name, type, unit, min_value: minValue, max_value: maxValue, question: name
+    })});
+    newItem = rows[0];
+  } catch(e){
+    showToast('✗ Could not create — try again');
+    return;
+  }
+
+  const emoji = {Sleep:'🌙', Food:'🍎', Move:'🏃', Zen:'🧘'};
+  DID_CATALOG.push({id:newItem.id, category:newItem.category, emoji:emoji[newItem.category]||'', name:newItem.name});
+  DID_CATALOG.sort((a,b) => a.category.localeCompare(b.category));
+  renderDidPicker();
+  toggleDid(newItem.id); // pre-select it — Dave just made this specifically for this client
+
+  document.getElementById('new-did-name').value = '';
+  document.getElementById('new-did-unit').value = '';
+  toggleNewDidForm();
+  showToast(`✓ ${name} added to catalog`);
 }
 
 function openAddClient(fromRoster){
