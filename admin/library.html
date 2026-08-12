@@ -198,7 +198,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div class="page-title">Check-In Library</div>
       <div class="page-sub">What clients can be accountable for. Assign these to a client with their own goal and days.</div>
 
-      <button class="add-btn" onclick="showScreen('screen-add')">＋ Add new item</button>
+      <button class="add-btn" onclick="openAddNewItem()">＋ Add new item</button>
 
       <div class="item-list" id="item-list"></div>
     </div>
@@ -206,7 +206,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
     <!-- SCREEN: ADD ITEM -->
     <div id="screen-add" class="hidden">
       <div class="back-link" onclick="resetAndBack()">← Back to library</div>
-      <div class="page-title" style="font-size:19px">Add a check-in item</div>
+      <div class="page-title" style="font-size:19px" id="screen-add-heading">Add a check-in item</div>
       <div class="page-sub">Talk it through or paste it in — a plan from Premier U, a note, or just describe it out loud. Claude drafts the item; you review it before it's added.</div>
 
       <div id="paste-stage">
@@ -228,19 +228,29 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       </div>
 
       <div id="draft-stage" class="hidden draft-wrap">
-        <div class="note-callout">
+        <div class="note-callout" id="draft-note-callout">
           <div class="note-icon">💡</div>
           <div class="note-text"><b>Heads up —</b> "start around 20" sounds like a personal starting goal, not a fixed scale. Drafted 0–50 as the range everyone would use; set each client's actual target when you assign it.</div>
         </div>
 
         <div class="field-block">
-          <div class="field-label">Category</div>
-          <div class="type-toggle" id="category-toggle" style="grid-template-columns:repeat(4,1fr)">
-            <div class="type-opt" data-cat="sleep">🌙 Sleep</div>
-            <div class="type-opt" data-cat="food">🍎 Food</div>
-            <div class="type-opt selected" data-cat="move">🏃 Move</div>
-            <div class="type-opt" data-cat="zen">🧘 Zen</div>
+          <div class="field-label">Organization <span style="font-weight:400;color:var(--ink-faint)">— who this item is for</span></div>
+          <div class="type-toggle" id="org-toggle">
+            <div class="type-opt selected" data-org="">All orgs (shared)</div>
+            <div class="type-opt" data-org="strong">Studio Strong only</div>
+            <div class="type-opt" data-org="premier">Premier U only</div>
           </div>
+        </div>
+
+        <div class="field-block">
+          <div class="field-label">Category</div>
+          <input type="text" id="draft-category" list="category-suggestions" value="Move" placeholder="e.g. Move, Exercise, Nutrition">
+          <datalist id="category-suggestions"></datalist>
+        </div>
+
+        <div class="field-block">
+          <div class="field-label">Sub-category <span style="font-weight:400;color:var(--ink-faint)">— optional</span></div>
+          <input type="text" id="draft-subcategory" placeholder="e.g. Protein, Foundations">
         </div>
 
         <div class="field-block">
@@ -291,7 +301,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <textarea id="draft-recommendation" style="min-height:64px">If a client's stuck near their starting number for 2+ weeks, that's worth a conversation before just raising the goal.</textarea>
         </div>
 
-        <button class="save-btn" onclick="saveItem()">Add to Library</button>
+        <button class="save-btn" onclick="saveItem()"><span id="save-btn-label">Add to Library</span></button>
       </div>
     </div>
 
@@ -374,109 +384,47 @@ function showScreen(id){
   });
 }
 
-let library = [
-  {id:"protein", category:"food", name:"Protein intake", type:"numeric", unit:"g",
-    question:"How much protein did you get today?",
-    guidance:"Spread protein across meals to support recovery, training adaptations, and satiety through the day.",
-    recommendation:"A shake or bar can fill the gap on busier days — consistency matters more than any single meal.",
-    weekPattern:[1,1,1,1,1,0,0],
-    clients:[
-      {name:"Jane Whitfield", goal:75, profile:"good",
-        history:[{goal:60,from:"Apr 1",to:"May 12"},{goal:65,from:"May 12",to:"Jun 30"},{goal:75,from:"Jun 30",to:"now"}]},
-      {name:"Marcus Webb", goal:100, profile:"strong", history:[{goal:100,from:"May 1",to:"now"}]},
-      {name:"Priya Anand", goal:60, profile:"good", history:[{goal:60,from:"May 15",to:"now"}]},
-      {name:"Sam O'Connell", goal:80, profile:"inconsistent", history:[{goal:80,from:"Jun 1",to:"now"}]}
-    ]},
-  {id:"wake", category:"sleep", name:"Consistent wake time", type:"yesno", unit:null,
-    question:"Did you wake up within 30 minutes of your target time today?",
-    guidance:"Maintain a 7.5–8.5 hour sleep window. Wake time should not deviate more than 30 minutes, even if bedtime shifts later.",
-    recommendation:"Melatonin 0.3–1mg, taken 2–4 hours before target bedtime, for the first 2 weeks while the rhythm resets.",
-    weekPattern:[1,1,1,1,1,1,1],
-    clients:[
-      {name:"Jane Whitfield", goal:null, goalLabel:"6:30 AM", profile:"good", history:[{goal:null,from:"Apr 1",to:"now"}]},
-      {name:"Marcus Webb", goal:null, goalLabel:"5:45 AM", profile:"strong", history:[{goal:null,from:"May 1",to:"now"}]},
-      {name:"Tasha Brooks", goal:null, goalLabel:"7:00 AM", profile:"inconsistent", history:[{goal:null,from:"Jun 10",to:"now"}]}
-    ]},
-  {id:"sleep", category:"sleep", name:"Sleep duration", type:"numeric", unit:"hrs",
-    question:"About how many hours did you sleep last night?",
-    guidance:"Aim for 7.5–8.5 hours nightly. Track trend over precision — a rough estimate each morning is enough.",
-    recommendation:"If consistently under 7 hours, revisit the evening wind-down routine before adding supplements.",
-    weekPattern:[1,1,1,1,1,1,1],
-    clients:[
-      {name:"Priya Anand", goal:8, profile:"good", history:[{goal:8,from:"May 15",to:"now"}]},
-      {name:"Tasha Brooks", goal:7.5, profile:"inconsistent", history:[{goal:7.5,from:"Jun 10",to:"now"}]}
-    ]},
-  {id:"light", category:"sleep", name:"Morning light exposure", type:"yesno", unit:null,
-    question:"Did you get outside for morning light today?",
-    guidance:"Direct sunlight within the first hour of waking: 15 min on sunny days, 30 min on cloudy days.",
-    recommendation:"A short walk works as well as standing outside — the goal is light exposure, not exercise.",
-    weekPattern:[1,1,1,1,1,1,1],
-    clients:[
-      {name:"Jane Whitfield", goal:null, goalLabel:"15 min", profile:"good", history:[{goal:null,from:"Jun 30",to:"now"}]},
-      {name:"Priya Anand", goal:null, goalLabel:"20 min", profile:"good", history:[{goal:null,from:"May 15",to:"now"}]}
-    ]},
-  {id:"steps", category:"move", name:"Daily steps (NEAT)", type:"numeric", unit:"steps",
-    question:"About how many steps today?",
-    guidance:"Non-exercise movement matters as much as training days for overall energy balance.",
-    recommendation:"Short walks after meals are an easy way to add steps without a dedicated workout block.",
-    weekPattern:[1,1,1,1,1,1,1],
-    clients:[
-      {name:"Jane Whitfield", goal:8000, profile:"good", history:[{goal:8000,from:"Jun 30",to:"now"}]},
-      {name:"Marcus Webb", goal:10000, profile:"strong", history:[{goal:10000,from:"May 1",to:"now"}]},
-      {name:"Priya Anand", goal:7000, profile:"good", history:[{goal:7000,from:"May 15",to:"now"}]},
-      {name:"Sam O'Connell", goal:8000, profile:"inconsistent", history:[{goal:8000,from:"Jun 1",to:"now"}]},
-      {name:"Tasha Brooks", goal:6000, profile:"good", history:[{goal:6000,from:"Jun 10",to:"now"}]}
-    ]},
-  {id:"training", category:"move", name:"Resistance training session", type:"yesno", unit:null,
-    question:"Did you get a resistance training session in today?",
-    guidance:"Core Studio Strong offering — this is the primary adherence signal for the Premier U partnership.",
-    recommendation:"Missed sessions are a strong trigger for a trainer check-in, not just a data point.",
-    weekPattern:[1,0,1,0,1,0,0],
-    clients:[
-      {name:"Jane Whitfield", goal:null, goalLabel:"45 min", profile:"good", history:[{goal:null,from:"May 5",to:"now"}]},
-      {name:"Marcus Webb", goal:null, goalLabel:"60 min", profile:"strong", history:[{goal:null,from:"May 1",to:"now"}]},
-      {name:"Priya Anand", goal:null, goalLabel:"45 min", profile:"strong", history:[{goal:null,from:"May 15",to:"now"}]},
-      {name:"Sam O'Connell", goal:null, goalLabel:"30 min", profile:"inconsistent", history:[{goal:null,from:"Jun 1",to:"now"}]},
-      {name:"Tasha Brooks", goal:null, goalLabel:"45 min", profile:"good", history:[{goal:null,from:"Jun 10",to:"now"}]},
-      {name:"Derek Nguyen", goal:null, goalLabel:"60 min", profile:"good", history:[{goal:null,from:"Jun 20",to:"now"}]}
-    ]},
-  {id:"supplements", category:"food", name:"Took supplements", type:"yesno", unit:null,
-    question:"Did you take your supplements today?",
-    guidance:"Simple adherence check — no clinical detail needed here beyond yes/no.",
-    recommendation:"—",
-    weekPattern:[1,1,1,1,1,1,1],
-    clients:[
-      {name:"Marcus Webb", goal:null, profile:"strong", history:[{goal:null,from:"Jun 1",to:"now"}]}
-    ]},
-  {id:"gratitude", category:"zen", name:"Gratitude", type:"reflection", unit:null,
-    question:"What's one good thing from today?",
-    guidance:"No right answer — small counts. This is about the habit of noticing, not the size of the thing.",
-    recommendation:"If someone's stuck for an answer more than a couple days running, that's worth a real conversation, not a nudge to try harder.",
-    weekPattern:[1,1,1,1,1,1,1],
-    clients:[
-      {name:"Jane Whitfield", goal:null, profile:"good", history:[{goal:null,from:"Jun 30",to:"now"}]}
-    ]}
-];
+// ─── Real config ──────────────────────────────────────────────────────────
+const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
+const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
+const SBH = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
+async function sbReq(path, opts = {}) {
+  const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...opts, headers: { ...SBH, ...opts.headers } });
+  if (!r.ok) throw new Error(await r.text());
+  const text = await r.text();
+  return text ? JSON.parse(text) : null;
+}
 
-const PREVIEW_MAX = {protein:150, sleep:12, steps:15000};
+let library = [];      // real checkin_library_items, fetched at init
+let orgLookup = {};    // real org id -> short label (Studio Strong / Premier U)
+let orgIdByKey = {};   // 'strong'/'premier' -> real org id, for the add/edit form
 
-const PROFILE_WEIGHTS = {
-  strong:{hit:.78, partial:.14},
-  good:{hit:.55, partial:.28},
-  inconsistent:{hit:.30, partial:.25}
-};
+async function loadLibrary(){
+  const [items, orgs] = await Promise.all([
+    sbReq('checkin_library_items?select=*&order=category'),
+    sbReq('checkin_orgs?select=id,name')
+  ]);
+  orgs.forEach(o => {
+    orgLookup[o.id] = o.name;
+    if(/premier/i.test(o.name)) orgIdByKey.premier = o.id;
+    else if(/studio strong/i.test(o.name)) orgIdByKey.strong = o.id;
+  });
+  library = (items||[]).map(r => ({
+    id: r.id, category: r.category, subCategory: r.sub_category, orgId: r.org_id,
+    name: r.name, type: r.type, unit: r.unit, min: r.min_value, max: r.max_value,
+    question: r.question, guidance: r.guidance, recommendation: r.recommendation
+  }));
+}
 
-const CATEGORIES = [
-  {id:"sleep", label:"Sleep", emoji:"🌙"},
-  {id:"food", label:"Food", emoji:"🍎"},
-  {id:"move", label:"Move", emoji:"🏃"},
-  {id:"zen", label:"Zen", emoji:"🧘"}
-];
 function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : '#'; }
 function typeLabel(item){
   if(item.type === 'yesno') return 'Yes / No';
   if(item.type === 'reflection') return 'Talk / type';
-  return 'Numeric · ' + item.unit;
+  return 'Numeric · ' + (item.unit||'');
+}
+function orgLabel(orgId){
+  if(!orgId) return 'All orgs';
+  return orgLookup[orgId] || 'Unknown org';
 }
 
 function genDays(weekPattern, profile, type){
@@ -511,118 +459,64 @@ function ensureClientDays(item){
 function renderLibrary(){
   const list = document.getElementById('item-list');
   let html = '';
-  CATEGORIES.forEach(cat => {
-    const items = library.filter(item => item.category === cat.id);
+  const cats = [...new Set(library.map(i => i.category))]; // real categories present, whatever this org's taxonomy is
+  cats.forEach(cat => {
+    const items = library.filter(item => item.category === cat);
     if(!items.length) return;
-    html += `<div class="cat-header">${cat.emoji} ${cat.label}</div>`;
-    html += items.map(item => {
-      const i = library.indexOf(item);
-      return `
-      <div class="item-card" onclick="openItemDetail(${i})">
+    html += `<div class="cat-header">📋 ${cat}</div>`;
+    html += items.map(item => `
+      <div class="item-card" onclick="openEditItem('${item.id}')">
         <div class="item-icon ${item.type}">${typeIcon(item.type)}</div>
         <div class="item-body">
-          <div class="item-name">${item.name}</div>
+          <div class="item-name">${item.name}${item.subCategory ? ` <span style="font-weight:400;color:var(--ink-faint)">· ${item.subCategory}</span>` : ''}</div>
           <div class="item-meta">${typeLabel(item)}</div>
         </div>
-        <div class="item-usage">${item.clients.length} client${item.clients.length===1?'':'s'}</div>
-      </div>`;
-    }).join('');
+        <div class="item-usage">${orgLabel(item.orgId)}</div>
+      </div>`).join('');
   });
-  const uncategorized = library.filter(item => !item.category);
-  if(uncategorized.length){
-    html += `<div class="cat-header">📋 Uncategorized</div>`;
-    html += uncategorized.map(item => {
-      const i = library.indexOf(item);
-      return `
-      <div class="item-card" onclick="openItemDetail(${i})">
-        <div class="item-icon ${item.type}">${typeIcon(item.type)}</div>
-        <div class="item-body">
-          <div class="item-name">${item.name}</div>
-          <div class="item-meta">${typeLabel(item)}</div>
-        </div>
-        <div class="item-usage">${item.clients.length} client${item.clients.length===1?'':'s'}</div>
-      </div>`;
-    }).join('');
-  }
-  list.innerHTML = html;
+  list.innerHTML = html || `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Nothing in the library yet.</div>`;
+
+  // Keep category suggestions current for the add/edit form's datalist
+  const suggestions = document.getElementById('category-suggestions');
+  if(suggestions) suggestions.innerHTML = cats.map(c => `<option value="${c}">`).join('');
 }
-renderLibrary();
 
-let currentItemIdx = null;
+async function initLibrary(){
+  try { await loadLibrary(); }
+  catch(e){ document.getElementById('item-list').innerHTML = `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Could not load — check connection.</div>`; return; }
+  renderLibrary();
+}
+initLibrary();
 
-function openItemDetail(i){
-  currentItemIdx = i;
-  const item = library[i];
-  ensureClientDays(item);
+let editingItemId = null;
 
-  document.getElementById('detail-icon').className = 'item-icon ' + item.type;
-  document.getElementById('detail-icon').textContent = typeIcon(item.type);
-  document.getElementById('detail-name').textContent = item.name;
-  document.getElementById('detail-meta').textContent = typeLabel(item);
+function openEditItem(id){
+  editingItemId = id;
+  const item = library.find(x => x.id === id);
+  if(!item) return;
 
-  const preview = document.getElementById('detail-preview');
-  if(item.type === 'yesno'){
-    preview.innerHTML = `
-      <div class="preview-q">${item.question}</div>
-      <div class="preview-pills"><div class="preview-pill">Yes</div><div class="preview-pill">No</div></div>`;
-  } else if(item.type === 'reflection'){
-    preview.innerHTML = `
-      <div class="preview-q">${item.question}</div>
-      <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
-        <div style="width:34px;height:34px;border-radius:50%;background:var(--care);display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
-        </div>
-        <div style="font-size:12px;color:var(--ink-faint)">Tap to talk, or type instead</div>
-      </div>`;
-  } else {
-    preview.innerHTML = `
-      <div class="preview-q">${item.question}</div>
-      <div class="preview-slider-track">
-        <div class="preview-slider-fill" style="width:45%"></div>
-        <div class="preview-goal-tick" style="left:60%"></div>
-        <div class="preview-slider-thumb" style="left:45%"></div>
-      </div>
-      <div class="preview-scale"><span>0${item.unit}</span><span>Client's own goal shown on the track</span></div>`;
-  }
+  document.getElementById('screen-add-heading').textContent = `Edit ${item.name}`;
+  document.getElementById('draft-note-callout').classList.add('hidden');
+  document.getElementById('paste-stage').classList.add('hidden');
+  document.getElementById('draft-stage').classList.remove('hidden');
 
-  document.getElementById('detail-guidance').innerHTML = `<b>Guidance —</b> ${item.guidance}`;
-  document.getElementById('detail-recommendation').innerHTML = `<b>Recommendation —</b> ${item.recommendation}`;
+  const orgKey = item.orgId === orgIdByKey.premier ? 'premier' : item.orgId === orgIdByKey.strong ? 'strong' : '';
+  document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === orgKey));
+  document.getElementById('draft-category').value = item.category || '';
+  document.getElementById('draft-subcategory').value = item.subCategory || '';
+  document.getElementById('draft-name').value = item.name || '';
+  document.querySelectorAll('#type-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.type === item.type));
+  document.getElementById('unit-block').classList.toggle('hidden', item.type !== 'numeric');
+  document.getElementById('minmax-block').classList.toggle('hidden', item.type !== 'numeric');
+  document.getElementById('draft-unit').value = item.unit || '';
+  document.getElementById('draft-min').value = item.min != null ? item.min : 0;
+  document.getElementById('draft-max').value = item.max != null ? item.max : 100;
+  document.getElementById('draft-question').value = item.question || '';
+  document.getElementById('draft-guidance').value = item.guidance || '';
+  document.getElementById('draft-recommendation').value = item.recommendation || '';
+  document.getElementById('save-btn-label').textContent = 'Save Changes';
 
-  const adherences = item.clients.map(c => adherencePct(c._days));
-  const avgAdherence = adherences.length ? Math.round(adherences.reduce((a,b)=>a+b,0) / adherences.length) : 0;
-  const statsEl = document.getElementById('detail-stats');
-  if(!item.clients.length){
-    statsEl.innerHTML = `<div class="stat-tile" style="grid-column:1/-1"><div class="stat-label" style="font-size:12px">Not assigned to any clients yet</div></div>`;
-    document.getElementById('detail-client-list').innerHTML = `<div class="internal-note">Assign this item to a client's plan to start seeing data here.</div>`;
-    showScreen('screen-item-detail');
-    return;
-  }
-  let tiles = `
-    <div class="stat-tile"><div class="stat-value">${item.clients.length}</div><div class="stat-label">Clients tracking</div></div>
-    <div class="stat-tile"><div class="stat-value">${avgAdherence}%</div><div class="stat-label">Avg adherence</div></div>`;
-  if(item.type === 'numeric'){
-    const avgGoal = Math.round(item.clients.reduce((s,c)=>s+c.goal,0) / item.clients.length);
-    tiles += `<div class="stat-tile"><div class="stat-value">${avgGoal}${item.unit}</div><div class="stat-label">Avg goal</div></div>`;
-  } else {
-    tiles += `<div class="stat-tile"><div class="stat-value">${adherences.filter(a=>a>=70).length}/${item.clients.length}</div><div class="stat-label">On track (70%+)</div></div>`;
-  }
-  statsEl.innerHTML = tiles;
-
-  document.getElementById('detail-client-list').innerHTML = item.clients.map((c, ci) => `
-    <div class="client-row" onclick="openClientStats(${i}, ${ci})">
-      <div class="client-row-avatar">${c.name[0]}</div>
-      <div class="client-row-body">
-        <div class="client-row-name">${c.name}</div>
-        <div class="client-row-goal">${item.type === 'numeric' ? 'Goal ' + c.goal + item.unit : (c.goalLabel ? 'Goal ' + c.goalLabel : typeLabel(item))}</div>
-      </div>
-      <div class="client-row-right">
-        <div class="dot-row">${c._days.slice(-7).map(d => `<div class="dot ${d}"></div>`).join('')}</div>
-        <div class="client-row-adherence">${adherencePct(c._days)}% adherence</div>
-      </div>
-    </div>
-  `).join('');
-
-  showScreen('screen-item-detail');
+  showScreen('screen-add');
 }
 
 function openClientStats(itemIdx, clientIdx){
@@ -696,6 +590,7 @@ function interpretAction(){
   setTimeout(() => {
     document.getElementById('paste-stage').classList.add('hidden');
     document.getElementById('draft-stage').classList.remove('hidden');
+    document.getElementById('draft-note-callout').classList.remove('hidden');
     btn.disabled = false;
     btn.innerHTML = '✨ Interpret with Claude';
   }, 1600);
@@ -732,31 +627,70 @@ document.getElementById('type-toggle').addEventListener('click', e => {
   document.getElementById('minmax-block').classList.toggle('hidden', !isNumeric);
 });
 
-document.getElementById('category-toggle').addEventListener('click', e => {
+document.getElementById('org-toggle').addEventListener('click', e => {
   const opt = e.target.closest('.type-opt'); if(!opt) return;
-  document.querySelectorAll('#category-toggle .type-opt').forEach(o => o.classList.toggle('selected', o===opt));
+  document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o===opt));
 });
 
-function saveItem(){
+function openAddNewItem(){
+  editingItemId = null;
+  document.getElementById('screen-add-heading').textContent = 'Add a check-in item';
+  document.getElementById('save-btn-label').textContent = 'Add to Library';
+  document.getElementById('draft-note-callout').classList.add('hidden');
+  document.getElementById('paste-stage').classList.remove('hidden');
+  document.getElementById('draft-stage').classList.add('hidden');
+  document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === ''));
+  document.getElementById('draft-category').value = '';
+  document.getElementById('draft-subcategory').value = '';
+  document.getElementById('draft-name').value = '';
+  document.querySelectorAll('#type-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.type === 'numeric'));
+  document.getElementById('unit-block').classList.remove('hidden');
+  document.getElementById('minmax-block').classList.remove('hidden');
+  document.getElementById('draft-unit').value = '';
+  document.getElementById('draft-min').value = 0;
+  document.getElementById('draft-max').value = 100;
+  document.getElementById('draft-question').value = '';
+  document.getElementById('draft-guidance').value = '';
+  document.getElementById('draft-recommendation').value = '';
+  showScreen('screen-add');
+}
+
+async function saveItem(){
   const type = document.querySelector('#type-toggle .type-opt.selected').dataset.type;
-  const category = document.querySelector('#category-toggle .type-opt.selected').dataset.cat;
-  library.unshift({
-    id: 'custom-' + Date.now(),
-    category: category,
-    name: document.getElementById('draft-name').value || 'Untitled item',
-    type: type,
-    unit: type === 'numeric' ? (document.getElementById('draft-unit').value || 'units') : null,
-    min: type === 'numeric' ? parseFloat(document.getElementById('draft-min').value || '0') : null,
-    max: type === 'numeric' ? parseFloat(document.getElementById('draft-max').value || '100') : null,
-    question: document.getElementById('draft-question').value,
-    guidance: document.getElementById('draft-guidance').value,
-    recommendation: document.getElementById('draft-recommendation').value,
-    weekPattern: [1,1,1,1,1,1,1],
-    clients: []
-  });
+  const orgKey = document.querySelector('#org-toggle .type-opt.selected').dataset.org;
+  const category = document.getElementById('draft-category').value.trim() || 'Uncategorized';
+  const subCategory = document.getElementById('draft-subcategory').value.trim() || null;
+  const name = document.getElementById('draft-name').value.trim();
+  if(!name){ showToast('✗ Give it a name first'); return; }
+
+  const payload = {
+    category, sub_category: subCategory, name, type,
+    org_id: orgKey ? orgIdByKey[orgKey] : null,
+    unit: type === 'numeric' ? (document.getElementById('draft-unit').value.trim() || null) : null,
+    min_value: type === 'numeric' ? parseFloat(document.getElementById('draft-min').value || '0') : null,
+    max_value: type === 'numeric' ? parseFloat(document.getElementById('draft-max').value || '100') : null,
+    question: document.getElementById('draft-question').value.trim() || name,
+    guidance: document.getElementById('draft-guidance').value.trim() || null,
+    recommendation: document.getElementById('draft-recommendation').value.trim() || null
+  };
+
+  try {
+    if(editingItemId){
+      await sbReq(`checkin_library_items?id=eq.${editingItemId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
+    } else {
+      await sbReq('checkin_library_items', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
+    }
+  } catch(e){
+    showToast('✗ Could not save — try again');
+    return;
+  }
+
+  const wasEditing = !!editingItemId;
+  editingItemId = null;
+  await loadLibrary();
   renderLibrary();
   resetAndBack();
-  showToast('✓ Added to library');
+  showToast(wasEditing ? '✓ Changes saved' : '✓ Added to library');
 }
 
 function resetAndBack(){
