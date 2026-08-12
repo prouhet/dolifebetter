@@ -265,6 +265,13 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
 
   <div class="content">
 
+    <!-- SCREEN: ACCESS DENIED -->
+    <div id="screen-denied" class="hidden" style="text-align:center;padding:60px 20px">
+      <div style="font-size:32px;margin-bottom:16px">🔒</div>
+      <div style="font-size:17px;font-weight:600;margin-bottom:8px">Staff link required</div>
+      <div style="font-size:14px;color:var(--ink-dim);line-height:1.5">This tool is only accessible with your own staff link. If you're a trainer at Studio Strong, use the link you were given — this page isn't reachable any other way.</div>
+    </div>
+
     <!-- SCREEN: MASTER LIST -->
     <div id="screen-master" class="hidden">
       <div class="back-link" onclick="openRoster(currentTrainerId, false)">← Back to my roster</div>
@@ -458,7 +465,7 @@ function toggleTheme(){applyTheme(!document.body.classList.contains('dark'));}
 applyTheme(false);
 
 function showScreen(id){
-  ['screen-master','screen-roster','screen-requests','screen-signups','screen-preferences','screen-reassign','screen-add-trainer','screen-add-client','screen-add-org'].forEach(s => {
+  ['screen-denied','screen-master','screen-roster','screen-requests','screen-signups','screen-preferences','screen-reassign','screen-add-trainer','screen-add-client','screen-add-org'].forEach(s => {
     document.getElementById(s).classList.toggle('hidden', s!==id);
   });
   window.scrollTo(0, 0);
@@ -1228,20 +1235,21 @@ async function init(){
     return;
   }
 
-  const matched = CURRENT_TOKEN ? trainers.find(t => t.token === CURRENT_TOKEN) : null;
+  const matched = CURRENT_TOKEN ? trainers.find(t => t.token === CURRENT_TOKEN && !t.archived) : null;
 
-  if(matched){
-    // Real token present and matched — this is the actual real-world path.
-    currentTrainerId = matched.id;
-    document.getElementById('sim-banner').classList.add('signed-in');
-    document.getElementById('sim-pills').innerHTML = `<div class="sim-pill active" style="cursor:default">${matched.name}${matched.isAdmin ? ' (admin)' : ''}</div>`;
-  } else {
-    // No token, or one that doesn't match anyone — preview-only fallback so this
-    // page stays testable without a real link. Never happens for a real trainer
-    // using their real link.
-    currentTrainerId = trainers.length ? trainers[0].id : null;
-    renderSimPills();
+  if(!matched){
+    // No token, or one that doesn't match a real, active trainer. This used to fall
+    // back to a picker showing every trainer's real roster — a real data exposure,
+    // since this page is public and reachable by anyone. Now it shows nothing real
+    // at all: no names, no clients, no banner. Access requires an actual staff link.
+    document.getElementById('sim-banner').classList.add('hidden');
+    showScreen('screen-denied');
+    return;
   }
+
+  currentTrainerId = matched.id;
+  document.getElementById('sim-banner').classList.add('signed-in');
+  document.getElementById('sim-pills').innerHTML = `<div class="sim-pill active" style="cursor:default">${matched.name}${matched.isAdmin ? ' (admin)' : ''}</div>`;
 
   renderTrainers();
   renderAllClients();
@@ -1249,7 +1257,7 @@ async function init(){
   renderOrgs();
   renderOrgPicker();
   updateSignupsLink();
-  if(currentTrainerId) openRoster(currentTrainerId, false);
+  openRoster(currentTrainerId, false);
 }
 
 function renderSimPills(){
