@@ -286,6 +286,12 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" style="color:var(--green)"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
 
+      <div class="requests-link" onclick="goToLibrary()">
+        <div class="requests-link-icon">📋</div>
+        <div class="requests-link-text">Check-In Library — add, edit, or remove tracked items</div>
+        <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+
       <div class="tabs">
         <div class="tab active" data-tab="trainers" onclick="switchTab('trainers')">Trainers</div>
         <div class="tab" data-tab="clients" onclick="switchTab('clients')">Clients</div>
@@ -608,9 +614,21 @@ async function loadRealData(){
     sbReq('checkin_clients?select=id,name,phone,org_id,trainer_id,token&order=name'),
   ]);
 
+  // Separate, defensive fetch — this table is from the most recent migration, so this
+  // degrades gracefully (every trainer just shows no org tags) if it hasn't landed yet,
+  // rather than breaking trainer/client loading entirely.
+  let trainerOrgsByTrainer = {};
+  try {
+    const rawTrainerOrgs = await sbReq('checkin_trainer_orgs?select=trainer_id,org_id');
+    (rawTrainerOrgs||[]).forEach(row => {
+      if(!trainerOrgsByTrainer[row.trainer_id]) trainerOrgsByTrainer[row.trainer_id] = [];
+      trainerOrgsByTrainer[row.trainer_id].push(row.org_id);
+    });
+  } catch(e){ /* trainerOrgsByTrainer stays empty — every trainer just shows no org tags */ }
+
   trainers = (rawTrainers||[]).map(t => ({
     id: t.id, name: t.name, email: t.email, isAdmin: t.is_admin, token: t.token,
-    maxDidsPerDay: t.max_dids_per_day, archived: !!t.archived_at
+    maxDidsPerDay: t.max_dids_per_day, archived: !!t.archived_at, orgIds: trainerOrgsByTrainer[t.id] || []
   }));
   orgs = (rawOrgs||[]).map(o => ({ id: o.id, name: o.name, archived: !!o.archived_at, isDefault: o.is_default }));
 
@@ -650,7 +668,7 @@ function renderTrainers(){
         <div style="display:flex;align-items:center;gap:13px;flex:1;min-width:0;cursor:pointer" onclick="openRoster('${t.id}', true)">
           <div class="trainer-avatar">${t.name[0]}</div>
           <div class="trainer-body">
-            <div class="trainer-name">${t.name}</div>
+            <div class="trainer-name">${t.name}${t.orgIds.map(oid => ` <span class="badge ${orgColorClass(oid)}" style="margin-left:4px">${orgs.find(o=>o.id===oid)?.name||''}</span>`).join('')}</div>
             <div class="trainer-email">${t.email}</div>
           </div>
         </div>
@@ -855,6 +873,9 @@ function signupCardHtml(s){
     </div>`;
 }
 
+function goToLibrary(){
+  window.location.href = `library.html?id=${CURRENT_TOKEN}`;
+}
 async function openSignups(){
   document.getElementById('signups-list').innerHTML = `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Loading…</div>`;
   showScreen('screen-signups');

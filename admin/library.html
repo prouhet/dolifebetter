@@ -126,6 +126,9 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
 
 /* Item detail: client-facing preview */
 .section-label{font-size:12px;font-weight:600;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.04em;margin:24px 0 12px}
+.tabs{display:flex;gap:8px;margin-bottom:20px;background:var(--surface-soft);padding:4px;border-radius:12px}
+.tab{flex:1;text-align:center;padding:9px;border-radius:9px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--ink-dim);transition:all .15s ease}
+.tab.active{background:var(--surface);color:var(--ink);box-shadow:var(--shadow-sm)}
 .section-label:first-of-type{margin-top:0}
 .item-head{display:flex;align-items:center;gap:12px;margin-bottom:4px}
 .item-head .item-icon{width:40px;height:40px;font-size:17px}
@@ -194,10 +197,23 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
 
   <div class="content">
 
+    <!-- SCREEN: ACCESS DENIED -->
+    <div id="screen-denied" class="hidden" style="text-align:center;padding:60px 20px">
+      <div style="font-size:32px;margin-bottom:16px">🔒</div>
+      <div style="font-size:17px;font-weight:600;margin-bottom:8px">Staff link required</div>
+      <div style="font-size:14px;color:var(--ink-dim);line-height:1.5">This tool is only accessible with your own staff link. If you're a trainer at Studio Strong, use the link you were given — this page isn't reachable any other way.</div>
+    </div>
+
     <!-- SCREEN: LIBRARY -->
-    <div id="screen-library">
+    <div id="screen-library" class="hidden">
+      <div class="back-link" onclick="goToAdmin()">← Back to admin</div>
       <div class="page-title">Check-In Library</div>
       <div class="page-sub">What clients can be accountable for. Assign these to a client with their own goal and days.</div>
+      <div class="tabs" id="org-filter-tabs" style="margin-bottom:16px">
+        <div class="tab active" data-org-filter="" onclick="setOrgFilter('')">All</div>
+        <div class="tab" data-org-filter="strong" onclick="setOrgFilter('strong')">Studio Strong</div>
+        <div class="tab" data-org-filter="premier" onclick="setOrgFilter('premier')">Premier U</div>
+      </div>
 
       <button class="add-btn" onclick="openAddNewItem()">＋ Add new item</button>
 
@@ -387,7 +403,7 @@ function toggleTheme(){applyTheme(!document.body.classList.contains('dark'));}
 applyTheme(false);
 
 function showScreen(id){
-  ['screen-library','screen-add','screen-item-detail','screen-client-stats'].forEach(s => {
+  ['screen-denied','screen-library','screen-add','screen-item-detail','screen-client-stats'].forEach(s => {
     document.getElementById(s).classList.toggle('hidden', s!==id);
   });
 }
@@ -465,12 +481,22 @@ function ensureClientDays(item){
   item.clients.forEach(c => { if(!c._days) c._days = genDays(item.weekPattern, c.profile, item.type); });
 }
 
+let orgFilter = ''; // '' = all, 'strong' or 'premier' = that org's shared + org-specific items
+
+function setOrgFilter(key){
+  orgFilter = key;
+  document.querySelectorAll('#org-filter-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.orgFilter === key));
+  renderLibrary();
+}
+
 function renderLibrary(){
   const list = document.getElementById('item-list');
   let html = '';
-  const cats = [...new Set(library.map(i => i.category))]; // real categories present, whatever this org's taxonomy is
+  const filterOrgId = orgFilter ? orgIdByKey[orgFilter] : null;
+  const visible = orgFilter ? library.filter(i => !i.orgId || i.orgId === filterOrgId) : library;
+  const cats = [...new Set(visible.map(i => i.category))]; // real categories present, whatever this org's taxonomy is
   cats.forEach(cat => {
-    const items = library.filter(item => item.category === cat);
+    const items = visible.filter(item => item.category === cat);
     if(!items.length) return;
     html += `<div class="cat-header">📋 ${cat}</div>`;
     html += items.map(item => `
@@ -490,10 +516,40 @@ function renderLibrary(){
   if(suggestions) suggestions.innerHTML = cats.map(c => `<option value="${c}">`).join('');
 }
 
+const CURRENT_TOKEN = new URLSearchParams(window.location.search).get('id') || '';
+function goToAdmin(){
+  window.location.href = `index.html?id=${CURRENT_TOKEN}`;
+}
+
 async function initLibrary(){
+  let trainers;
+  try {
+    trainers = await sbReq('checkin_trainers?select=id,name,token&archived_at=is.null');
+  } catch(e){
+    document.getElementById('item-list').innerHTML = `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Could not load — check connection.</div>`;
+    showScreen('screen-library');
+    return;
+  }
+  const matched = CURRENT_TOKEN ? (trainers||[]).find(t => t.token === CURRENT_TOKEN) : null;
+  if(!matched){
+    showScreen('screen-denied');
+    return;
+  }
+
   try { await loadLibrary(); }
-  catch(e){ document.getElementById('item-list').innerHTML = `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Could not load — check connection.</div>`; return; }
+  catch(e){ document.getElementById('item-list').innerHTML = `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Could not load — check connection.</div>`; showScreen('screen-library'); return; }
   renderLibrary();
+
+  // Deep-link support: arriving with ?edit=ITEM_ID (e.g. from a client's plan page)
+  // should land directly on that item's real edit form, not the list — the whole
+  // point of linking here instead of just saying "go to the library" separately.
+  const editTargetId = new URLSearchParams(window.location.search).get('edit');
+  const editTarget = editTargetId ? library.find(i => i.id === editTargetId) : null;
+  if(editTarget){
+    openEditItem(editTarget.id);
+  } else {
+    showScreen('screen-library');
+  }
 }
 initLibrary();
 

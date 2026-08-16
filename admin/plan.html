@@ -180,12 +180,46 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div class="back-link" onclick="showScreen('screen-plan')">← Back to <span id="pick-back-name">their</span> plan</div>
       <div class="section-label" style="margin-top:0">Pick from the library</div>
       <div class="picker-list" id="picker-list"></div>
+      <div class="new-did-toggle" onclick="toggleNewItemForm()" id="new-item-toggle" style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer;margin-top:14px;display:inline-block">+ Create a new item</div>
+      <div id="new-item-form" class="hidden" style="margin-top:12px;padding:16px;border-radius:14px;background:var(--surface);border:1px solid var(--surface-soft)">
+        <div class="config-label">Organization</div>
+        <div class="mode-toggle" id="new-item-org" style="margin-bottom:14px;grid-template-columns:1fr 1fr 1fr">
+          <div class="mode-opt" data-org="">All orgs</div>
+          <div class="mode-opt" data-org="strong">Studio Strong</div>
+          <div class="mode-opt" data-org="premier">Premier U</div>
+        </div>
+        <div class="config-label">Category</div>
+        <input type="text" id="new-item-category" placeholder="e.g. Move, Exercise, Nutrition" style="width:100%;padding:11px 13px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);margin-bottom:14px;outline:none">
+        <div class="config-label">Name</div>
+        <input type="text" id="new-item-name" placeholder="e.g. Evening walk" style="width:100%;padding:11px 13px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);margin-bottom:14px;outline:none">
+        <div class="config-label">Type</div>
+        <div class="mode-toggle" id="new-item-type" style="margin-bottom:14px;grid-template-columns:1fr 1fr">
+          <div class="mode-opt selected" data-type="yesno">Yes/No</div>
+          <div class="mode-opt" data-type="numeric">Numeric</div>
+          <div class="mode-opt" data-type="reflection">Talk/type</div>
+          <div class="mode-opt" data-type="choice">Multiple choice</div>
+        </div>
+        <div id="new-item-unit-block" class="hidden">
+          <div class="config-label">Unit</div>
+          <input type="text" id="new-item-unit" placeholder="e.g. g, hrs, steps" style="width:100%;padding:11px 13px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);margin-bottom:14px;outline:none">
+        </div>
+        <div id="new-item-choices-block" class="hidden">
+          <div class="config-label">Options</div>
+          <div id="new-item-choices-list"></div>
+          <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer;margin:6px 0 14px" onclick="addNewItemChoice()">+ Add option</div>
+        </div>
+        <div class="save-btn" onclick="createNewLibraryItem()" style="text-align:center;cursor:pointer">＋ Create &amp; Assign to <span id="new-item-client-name">them</span></div>
+      </div>
     </div>
 
     <!-- SCREEN: CONFIGURE ITEM -->
     <div id="screen-config" class="hidden draft-wrap">
       <div class="back-link" id="config-back-link" onclick="goBackFromConfig()">← Back to library</div>
       <div class="section-label" style="margin-top:0" id="config-heading">Set Jane's goal</div>
+      <div id="edit-in-library-row" class="hidden" style="margin:-8px 0 18px">
+        <span style="font-size:13px;color:var(--ink-faint)">This only sets the schedule and goal. </span>
+        <span style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer;text-decoration:underline" onclick="editThisItemInLibrary()">Edit the item itself →</span>
+      </div>
 
       <div class="config-block">
         <div class="config-row hidden" id="goal-row">
@@ -284,6 +318,7 @@ const CLIENT_ID = new URLSearchParams(window.location.search).get('id');
 const TRAINER_TOKEN = new URLSearchParams(window.location.search).get('t') || '';
 let CLIENT = null;
 let LIBRARY = [];
+let orgIdByKey = {}; // 'strong'/'premier' -> real org id, for the create-new-item form
 let assigned = [];
 
 async function init(){
@@ -293,11 +328,7 @@ async function init(){
   }
   let clientRows, libRows, assignRows;
   try {
-    [clientRows, libRows, assignRows] = await Promise.all([
-      sbReq(`checkin_clients?select=*,checkin_trainers(name,max_dids_per_day),checkin_orgs(name)&id=eq.${CLIENT_ID}`),
-      sbReq(`checkin_library_items?select=*&order=category`),
-      sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT_ID}&order=effective_from`)
-    ]);
+    clientRows = await sbReq(`checkin_clients?select=*,checkin_trainers(name,max_dids_per_day),checkin_orgs(name)&id=eq.${CLIENT_ID}`);
   } catch(e){
     document.getElementById('client-name').textContent = 'Could not load — check connection';
     return;
@@ -307,6 +338,27 @@ async function init(){
     return;
   }
   CLIENT = clientRows[0];
+
+  try {
+    // Same org-scoping as everywhere else: shared items (org_id null) plus whatever's
+    // specific to this client's actual org — a Studio Strong client should never see
+    // Premier U's separate clinical catalog show up here, and vice versa.
+    const orgFilter = CLIENT.org_id ? `or=(org_id.is.null,org_id.eq.${CLIENT.org_id})` : 'org_id=is.null';
+    [libRows, assignRows] = await Promise.all([
+      sbReq(`checkin_library_items?select=*&${orgFilter}&order=category`),
+      sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT_ID}&order=effective_from`)
+    ]);
+    try {
+      const orgs = await sbReq('checkin_orgs?select=id,name');
+      (orgs||[]).forEach(o => {
+        if(/premier/i.test(o.name)) orgIdByKey.premier = o.id;
+        else if(/studio strong/i.test(o.name)) orgIdByKey.strong = o.id;
+      });
+    } catch(e){ /* create-new-item org toggle just won't have real ids to match against */ }
+  } catch(e){
+    document.getElementById('client-name').textContent = 'Could not load — check connection';
+    return;
+  }
   LIBRARY = (libRows||[]).map(r => ({id:r.id, name:r.name, type:r.type, unit:r.unit, minValue:r.min_value, maxValue:r.max_value, category:r.category, choices:r.choices}));
 
   // Group all assignment rows (past + current) by library item to reconstruct full goal history —
@@ -394,6 +446,20 @@ let pendingItem = null;
 
 function openPicker(){
   document.getElementById('pick-back-name').textContent = CLIENT.name.split(' ')[0] + "'s";
+  document.getElementById('new-item-client-name').textContent = CLIENT.name.split(' ')[0];
+  document.getElementById('new-item-form').classList.add('hidden');
+  document.getElementById('new-item-toggle').textContent = '+ Create a new item';
+  // Default the org choice to whatever this client's own org actually is — sensible
+  // starting point given we're already inside their plan, but still fully editable.
+  const orgKey = CLIENT.org_id === orgIdByKey.premier ? 'premier' : CLIENT.org_id === orgIdByKey.strong ? 'strong' : '';
+  document.querySelectorAll('#new-item-org .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === orgKey));
+  document.getElementById('new-item-category').value = '';
+  document.getElementById('new-item-name').value = '';
+  document.querySelectorAll('#new-item-type .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.type === 'yesno'));
+  document.getElementById('new-item-unit-block').classList.add('hidden');
+  document.getElementById('new-item-choices-block').classList.add('hidden');
+  document.getElementById('new-item-choices-list').innerHTML = '';
+
   const list = document.getElementById('picker-list');
   let html = '', lastCat = null;
   LIBRARY.forEach(item => {
@@ -414,6 +480,75 @@ function openPicker(){
   showScreen('screen-pick');
 }
 
+function toggleNewItemForm(){
+  const form = document.getElementById('new-item-form');
+  const isHidden = form.classList.contains('hidden');
+  form.classList.toggle('hidden');
+  document.getElementById('new-item-toggle').textContent = isHidden ? '− Cancel new item' : '+ Create a new item';
+}
+document.getElementById('new-item-org').addEventListener('click', e => {
+  const opt = e.target.closest('.mode-opt'); if(!opt) return;
+  document.querySelectorAll('#new-item-org .mode-opt').forEach(o => o.classList.toggle('selected', o===opt));
+});
+document.getElementById('new-item-type').addEventListener('click', e => {
+  const opt = e.target.closest('.mode-opt'); if(!opt) return;
+  document.querySelectorAll('#new-item-type .mode-opt').forEach(o => o.classList.toggle('selected', o===opt));
+  const type = opt.dataset.type;
+  document.getElementById('new-item-unit-block').classList.toggle('hidden', type !== 'numeric');
+  document.getElementById('new-item-choices-block').classList.toggle('hidden', type !== 'choice');
+  if(type === 'choice' && !document.getElementById('new-item-choices-list').children.length){
+    addNewItemChoice(); addNewItemChoice();
+  }
+});
+function addNewItemChoice(value){
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
+  row.innerHTML = `
+    <input type="text" class="new-item-choice-input" value="${value ? value.replace(/"/g,'&quot;') : ''}" placeholder="e.g. Cardio"
+      style="flex:1;padding:10px 12px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);outline:none">
+    <div onclick="this.parentElement.remove()" style="width:30px;height:30px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--ink-faint);cursor:pointer;font-size:18px">×</div>`;
+  document.getElementById('new-item-choices-list').appendChild(row);
+}
+
+async function createNewLibraryItem(){
+  const orgKey = document.querySelector('#new-item-org .mode-opt.selected')?.dataset.org || '';
+  const category = document.getElementById('new-item-category').value.trim() || 'Uncategorized';
+  const name = document.getElementById('new-item-name').value.trim();
+  if(!name){ showToast('✗ Give it a name first'); return; }
+  const type = document.querySelector('#new-item-type .mode-opt.selected').dataset.type;
+
+  let choices = null;
+  if(type === 'choice'){
+    choices = Array.from(document.querySelectorAll('.new-item-choice-input')).map(i => i.value.trim()).filter(Boolean);
+    if(choices.length < 2){ showToast('✗ Add at least 2 options'); return; }
+  }
+
+  const payload = {
+    category, name, type,
+    org_id: orgKey ? orgIdByKey[orgKey] : null,
+    unit: type === 'numeric' ? (document.getElementById('new-item-unit').value.trim() || null) : null,
+    min_value: type === 'numeric' ? 0 : null,
+    max_value: type === 'numeric' ? 100 : null,
+    choices,
+    question: name
+  };
+
+  let created;
+  try {
+    created = await sbReq('checkin_library_items', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify(payload)});
+  } catch(e){
+    showToast('✗ Could not create — try again');
+    return;
+  }
+  const item = created[0];
+  LIBRARY.push({id:item.id, name:item.name, type:item.type, unit:item.unit, minValue:item.min_value, maxValue:item.max_value, category:item.category, choices:item.choices});
+
+  // The whole reason to build this here rather than in the separate library tool is to
+  // save the trip back — so go straight into assigning it to this client, not back to
+  // a static list they'd have to tap into again.
+  pickItem(item.id);
+}
+
 let weeklyCount = 3;
 let lastInputStyle = 'slider'; // remembers this trainer's last choice across assignments
 let editingAssignmentId = null; // set when editing an existing assignment, null when adding new
@@ -428,6 +563,10 @@ function goBackFromConfig(){
     showScreen('screen-pick');
   }
 }
+function editThisItemInLibrary(){
+  if(!pendingItem) return;
+  window.location.href = `library.html?id=${TRAINER_TOKEN}&edit=${pendingItem.id}`;
+}
 
 function pickItem(id){
   editingAssignmentId = null;
@@ -436,6 +575,7 @@ function pickItem(id){
   document.getElementById('config-heading').textContent = `Set ${first}'s plan`;
   document.getElementById('save-btn-label').textContent = `Assign to ${first}`;
   document.getElementById('config-back-link').innerHTML = '← Back to library';
+  document.getElementById('edit-in-library-row').classList.add('hidden');
   document.getElementById('input-style-name').textContent = first;
   document.getElementById('weekly-name').textContent = first;
   document.getElementById('goal-row').classList.toggle('hidden', pendingItem.type !== 'numeric');
@@ -468,6 +608,7 @@ function openEditAssignment(assignmentId){
   document.getElementById('config-heading').textContent = `Edit ${first}'s ${a.name}`;
   document.getElementById('save-btn-label').textContent = 'Save Changes';
   document.getElementById('config-back-link').innerHTML = `← Back to ${first}'s plan`;
+  document.getElementById('edit-in-library-row').classList.toggle('hidden', !pendingItem);
   document.getElementById('input-style-name').textContent = first;
   document.getElementById('weekly-name').textContent = first;
   document.getElementById('goal-row').classList.toggle('hidden', a.type !== 'numeric');
