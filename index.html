@@ -161,6 +161,17 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
     <button class="cta" style="max-width:320px" onclick="dismissWelcome()">Let's go</button>
   </div>
 
+  <div id="screen-verify" class="screen hidden" style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:20px 4px 40px">
+    <div class="greeting" id="verify-greeting"></div>
+    <div class="subline">Your PIN is the last 4 digits of your phone number — unless you've changed it.</div>
+    <input type="tel" inputmode="numeric" maxlength="4" id="verify-input" placeholder="0000" oninput="checkVerifyValid()"
+      style="width:100%;max-width:180px;margin:8px 0 6px;padding:16px;border-radius:16px;border:1.5px solid var(--surface-soft);background:var(--surface);font-family:'DM Sans',sans-serif;font-size:28px;font-weight:700;letter-spacing:0.3em;text-align:center;color:var(--ink);outline:none">
+    <div id="verify-error" class="hidden" style="font-size:13px;color:var(--care);margin-bottom:14px">That doesn't match — try again, or check the link your trainer sent.</div>
+    <div id="verify-stuck" class="hidden" style="font-size:13px;color:var(--ink-dim);background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:12px 14px;margin-bottom:14px">Still stuck? Text <span id="verify-stuck-name">your trainer</span> — they can look up what's on file and get you sorted.</div>
+    <button class="cta" id="verify-btn" style="max-width:320px;margin-top:14px" onclick="submitVerify()" disabled>Confirm</button>
+    <div style="font-size:12px;color:var(--ink-faint);margin-top:18px;max-width:300px">Just once per device — this keeps your check-ins private if this link is ever seen by someone else.</div>
+  </div>
+
   <div id="screen-poll" class="screen hidden">
     <div class="greeting" id="poll-greeting"></div>
     <div class="subline" id="poll-subline">How are you doing today?</div>
@@ -340,7 +351,7 @@ function toggleTheme(){applyTheme(!document.body.classList.contains('dark'));}
 applyTheme(false);
 
 function showScreen(id){
-  ['screen-loading','screen-welcome','screen-poll','screen-support','screen-21day','screen-confirm','screen-error'].forEach(s=>{
+  ['screen-loading','screen-welcome','screen-verify','screen-poll','screen-support','screen-21day','screen-confirm','screen-error'].forEach(s=>{
     const el = document.getElementById(s);
     el.classList.toggle('hidden', s!==id);
     if(s===id && s!=='screen-loading'){ el.classList.remove('screen'); void el.offsetWidth; el.classList.add('screen'); }
@@ -363,15 +374,41 @@ function todayDow(){ return DOW_SHORT[new Date().getDay()]; }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 
 // ─── Init ──────────────────────────────────────────────────────────────────
-async function init(){
-  if(!CLIENT_TOKEN){ window.location.href = 'get-started.html'; return; }
-  let rows;
-  try {
-    rows = await sbReq(`checkin_clients?select=id,name,token,checkin_trainers(id,name),checkin_orgs(name)&token=eq.${encodeURIComponent(CLIENT_TOKEN)}`);
-  } catch(e){ showScreen('screen-error'); return; }
-  if(!rows || !rows.length){ showScreen('screen-error'); return; }
-  CLIENT = rows[0];
-
+function isVerifiedOnThisDevice(){
+  try { return localStorage.getItem(`verified_${CLIENT_TOKEN}`) === 'true'; }
+  catch(e){ return false; } // localStorage disabled — just re-verify each time, not fatal
+}
+function markVerifiedOnThisDevice(){
+  try { localStorage.setItem(`verified_${CLIENT_TOKEN}`, 'true'); } catch(e){}
+}
+function last4(phone){
+  return (phone || '').replace(/\D/g, '').slice(-4);
+}
+function checkVerifyValid(){
+  const val = document.getElementById('verify-input').value.trim();
+  document.getElementById('verify-btn').disabled = val.length !== 4;
+  document.getElementById('verify-error').classList.add('hidden');
+}
+let verifyFailCount = 0;
+async function submitVerify(){
+  const entered = document.getElementById('verify-input').value.trim();
+  const correctPin = CLIENT.pin || last4(CLIENT.phone);
+  if(entered === correctPin){
+    markVerifiedOnThisDevice();
+    await continueAfterVerify();
+  } else {
+    verifyFailCount++;
+    document.getElementById('verify-error').classList.remove('hidden');
+    document.getElementById('verify-input').value = '';
+    document.getElementById('verify-btn').disabled = true;
+    if(verifyFailCount >= 3){
+      const trainerFirst = (CLIENT.checkin_trainers?.name || 'your trainer').split(' ')[0];
+      document.getElementById('verify-stuck-name').textContent = trainerFirst;
+      document.getElementById('verify-stuck').classList.remove('hidden');
+    }
+  }
+}
+async function continueAfterVerify(){
   const trainerFirst = (CLIENT.checkin_trainers?.name || 'your trainer').split(' ')[0];
   document.querySelectorAll('#trainer-name-inline, #trainer-name-inline-2, #trainer-name-inline-nothing').forEach(el => el.textContent = trainerFirst);
 
@@ -411,6 +448,27 @@ async function init(){
   }
 }
 
+async function init(){
+  if(!CLIENT_TOKEN){ window.location.href = 'get-started.html'; return; }
+  let rows;
+  try {
+    rows = await sbReq(`checkin_clients?select=id,name,token,phone,pin,checkin_trainers(id,name),checkin_orgs(name)&token=eq.${encodeURIComponent(CLIENT_TOKEN)}`);
+  } catch(e){ showScreen('screen-error'); return; }
+  if(!rows || !rows.length){ showScreen('screen-error'); return; }
+  CLIENT = rows[0];
+
+  // One-time identity check per device — protects against a forwarded or
+  // glanced-at link without adding friction to daily use. Once confirmed,
+  // this device is trusted for this specific client going forward.
+  if(!isVerifiedOnThisDevice()){
+    document.getElementById('verify-greeting').textContent = `Hey ${CLIENT.name.split(' ')[0]} 👋`;
+    showScreen('screen-verify');
+    return;
+  }
+
+  await continueAfterVerify();
+}
+
 function dismissWelcome(){ showScreen('screen-poll'); }
 
 // ─── Dynamic poll rendering ──────────────────────────────────────────────
@@ -434,6 +492,15 @@ function renderPoll(){
           <div class="pill-row" data-assignment="${a.id}">
             <div class="pill ${existing==='yes'?'selected':''}" data-val="yes" onclick="answerYesNo('${a.id}','yes')">Yes</div>
             <div class="pill ${existing==='no'?'selected':''}" data-val="no" onclick="answerYesNo('${a.id}','no')">No</div>
+          </div>
+        </div>`;
+    } else if(item.type === 'choice'){
+      const opts = item.choices || [];
+      return `
+        <div class="q-block">
+          <div class="q-row"><div class="q-label">${item.question}</div></div>
+          <div class="pill-row" data-assignment="${a.id}" style="flex-wrap:wrap">
+            ${opts.map(opt => `<div class="pill ${existing===opt?'selected':''}" data-val="${opt}" onclick="answerChoice('${a.id}', '${opt.replace(/'/g,"\\'")}')">${opt}</div>`).join('')}
           </div>
         </div>`;
     } else if(item.type === 'numeric'){
@@ -479,6 +546,11 @@ function renderPoll(){
 }
 
 function answerYesNo(assignmentId, val){
+  ANSWERS[assignmentId] = val;
+  document.querySelectorAll(`[data-assignment="${assignmentId}"] .pill`).forEach(p => p.classList.toggle('selected', p.dataset.val === val));
+  checkSubmittable();
+}
+function answerChoice(assignmentId, val){
   ANSWERS[assignmentId] = val;
   document.querySelectorAll(`[data-assignment="${assignmentId}"] .pill`).forEach(p => p.classList.toggle('selected', p.dataset.val === val));
   checkSubmittable();
