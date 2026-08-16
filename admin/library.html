@@ -62,6 +62,7 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
 .item-icon.yesno{background:var(--teal-tint);color:var(--teal-deep)}
 .item-icon.numeric{background:var(--amber-tint);color:var(--amber)}
 .item-icon.reflection{background:var(--care-tint);color:var(--care)}
+.item-icon.choice{background:var(--teal-tint-strong);color:var(--teal-deep)}
 .item-body{flex:1;min-width:0}
 .item-name{font-size:14.5px;font-weight:600;letter-spacing:-.005em}
 .item-meta{font-size:12px;color:var(--ink-faint);margin-top:2px}
@@ -260,11 +261,18 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
 
         <div class="field-block">
           <div class="field-label">Type</div>
-          <div class="type-toggle" id="type-toggle">
+          <div class="type-toggle" id="type-toggle" style="grid-template-columns:1fr 1fr">
             <div class="type-opt" data-type="yesno">Yes / No</div>
             <div class="type-opt selected" data-type="numeric">Numeric + goal</div>
             <div class="type-opt" data-type="reflection">Talk / type</div>
+            <div class="type-opt" data-type="choice">Multiple choice</div>
           </div>
+        </div>
+
+        <div class="field-block hidden" id="choices-block">
+          <div class="field-label">Options <span style="font-weight:400;color:var(--ink-faint)">— what a client taps to answer</span></div>
+          <div id="choices-list"></div>
+          <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer;margin-top:6px" onclick="addChoiceInput()">+ Add option</div>
         </div>
 
         <div class="field-block" id="unit-block">
@@ -412,14 +420,15 @@ async function loadLibrary(){
   library = (items||[]).map(r => ({
     id: r.id, category: r.category, subCategory: r.sub_category, orgId: r.org_id,
     name: r.name, type: r.type, unit: r.unit, min: r.min_value, max: r.max_value,
-    question: r.question, guidance: r.guidance, recommendation: r.recommendation
+    question: r.question, guidance: r.guidance, recommendation: r.recommendation, choices: r.choices
   }));
 }
 
-function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : '#'; }
+function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : type === 'choice' ? '☰' : '#'; }
 function typeLabel(item){
   if(item.type === 'yesno') return 'Yes / No';
   if(item.type === 'reflection') return 'Talk / type';
+  if(item.type === 'choice') return (item.choices||[]).join(' / ');
   return 'Numeric · ' + (item.unit||'');
 }
 function orgLabel(orgId){
@@ -508,6 +517,11 @@ function openEditItem(id){
   document.querySelectorAll('#type-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.type === item.type));
   document.getElementById('unit-block').classList.toggle('hidden', item.type !== 'numeric');
   document.getElementById('minmax-block').classList.toggle('hidden', item.type !== 'numeric');
+  document.getElementById('choices-block').classList.toggle('hidden', item.type !== 'choice');
+  document.getElementById('choices-list').innerHTML = '';
+  if(item.type === 'choice'){
+    (item.choices && item.choices.length ? item.choices : ['', '']).forEach(c => addChoiceInput(c));
+  }
   document.getElementById('draft-unit').value = item.unit || '';
   document.getElementById('draft-min').value = item.min != null ? item.min : 0;
   document.getElementById('draft-max').value = item.max != null ? item.max : 100;
@@ -623,9 +637,24 @@ document.getElementById('type-toggle').addEventListener('click', e => {
   const opt = e.target.closest('.type-opt'); if(!opt) return;
   document.querySelectorAll('#type-toggle .type-opt').forEach(o => o.classList.toggle('selected', o===opt));
   const isNumeric = opt.dataset.type === 'numeric';
+  const isChoice = opt.dataset.type === 'choice';
   document.getElementById('unit-block').classList.toggle('hidden', !isNumeric);
   document.getElementById('minmax-block').classList.toggle('hidden', !isNumeric);
+  document.getElementById('choices-block').classList.toggle('hidden', !isChoice);
+  if(isChoice && !document.getElementById('choices-list').children.length){
+    addChoiceInput(); addChoiceInput(); // start with 2 empty slots — the minimum that's actually a choice
+  }
 });
+
+function addChoiceInput(value){
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
+  row.innerHTML = `
+    <input type="text" class="choice-input" value="${value ? value.replace(/"/g,'&quot;') : ''}" placeholder="e.g. Cardio"
+      style="flex:1;padding:11px 13px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--surface);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);outline:none">
+    <div onclick="this.parentElement.remove()" style="width:32px;height:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--ink-faint);cursor:pointer;font-size:18px">×</div>`;
+  document.getElementById('choices-list').appendChild(row);
+}
 
 document.getElementById('org-toggle').addEventListener('click', e => {
   const opt = e.target.closest('.type-opt'); if(!opt) return;
@@ -646,6 +675,8 @@ function openAddNewItem(){
   document.querySelectorAll('#type-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.type === 'numeric'));
   document.getElementById('unit-block').classList.remove('hidden');
   document.getElementById('minmax-block').classList.remove('hidden');
+  document.getElementById('choices-block').classList.add('hidden');
+  document.getElementById('choices-list').innerHTML = '';
   document.getElementById('draft-unit').value = '';
   document.getElementById('draft-min').value = 0;
   document.getElementById('draft-max').value = 100;
@@ -663,12 +694,20 @@ async function saveItem(){
   const name = document.getElementById('draft-name').value.trim();
   if(!name){ showToast('✗ Give it a name first'); return; }
 
+  let choices = null;
+  if(type === 'choice'){
+    choices = Array.from(document.querySelectorAll('#choices-list .choice-input'))
+      .map(inp => inp.value.trim()).filter(Boolean);
+    if(choices.length < 2){ showToast('✗ Add at least 2 options'); return; }
+  }
+
   const payload = {
     category, sub_category: subCategory, name, type,
     org_id: orgKey ? orgIdByKey[orgKey] : null,
     unit: type === 'numeric' ? (document.getElementById('draft-unit').value.trim() || null) : null,
     min_value: type === 'numeric' ? parseFloat(document.getElementById('draft-min').value || '0') : null,
     max_value: type === 'numeric' ? parseFloat(document.getElementById('draft-max').value || '100') : null,
+    choices,
     question: document.getElementById('draft-question').value.trim() || name,
     guidance: document.getElementById('draft-guidance').value.trim() || null,
     recommendation: document.getElementById('draft-recommendation').value.trim() || null

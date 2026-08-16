@@ -331,7 +331,7 @@ async function init(){
   renderAssigned();
 }
 
-function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : '#'; }
+function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : type === 'choice' ? '☰' : '#'; }
 
 function goalBadgeHtml(a){
   if(a.type === 'numeric') return `<div class="assigned-goal">Goal ${a.goal}${a.unit}</div>`;
