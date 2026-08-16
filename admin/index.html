@@ -556,7 +556,13 @@ let trainers = [];
 let orgs = [];
 let clients = [];
 let requests = [];
-let signups = [];
+let signups = []; // real checkin_signups, fetched via loadSignups()
+
+async function loadSignups(){
+  try {
+    signups = await sbReq('checkin_signups?select=*,checkin_orgs(name)&status=eq.pending&order=created_at.desc') || [];
+  } catch(e){ signups = []; }
+}
 let CURRENT_TOKEN = new URLSearchParams(window.location.search).get('id') || '';
 
 async function computeClientDayData(client){
@@ -819,7 +825,8 @@ async function updateRequestsLink(){
   }
 }
 
-function updateSignupsLink(){
+async function updateSignupsLink(){
+  await loadSignups();
   const link = document.getElementById('signups-link');
   link.classList.toggle('hidden', signups.length === 0);
   if(signups.length){
@@ -828,27 +835,33 @@ function updateSignupsLink(){
 }
 
 function signupCardHtml(s){
-  const didNames = s.dids.map(id => { const item = DID_CATALOG.find(d => d.id === id); return item ? item.name : id; });
+  const ids = s.requested_item_ids || [];
+  const didNames = ids.map(id => { const item = DID_CATALOG.find(d => d.id === id); return item ? item.name : null; }).filter(Boolean);
+  const trainerLabel = s.preferred_trainer_id ? (trainerOf(s.preferred_trainer_id)?.name || 'Unknown') : 'No preference stated';
   return `
     <div class="request-card">
       <div class="request-top">
         <div class="request-kind add" style="background:var(--green-tint);color:var(--green)">Signup</div>
         <div class="request-client">${s.name}</div>
-        <div class="request-when">${s.when}</div>
+        <div class="request-when">${timeAgo(s.created_at)}</div>
       </div>
-      <div class="request-detail">${s.phone} · ${orgOf(s.orgId).name}</div>
+      <div class="request-detail">${s.phone || '—'} · ${s.checkin_orgs ? s.checkin_orgs.name : '—'}</div>
+      <div class="request-detail">Preferred trainer: ${trainerLabel}</div>
       <div class="request-change">Interested in: ${didNames.join(', ') || 'nothing picked yet — open to suggestions'}</div>
+      ${s.note ? `<div class="request-note">"${s.note}"</div>` : ''}
       <div class="request-actions">
         <div class="request-btn primary" style="flex:1" onclick="completeSignup('${s.id}')">Complete Setup</div>
       </div>
     </div>`;
 }
 
-function openSignups(){
+async function openSignups(){
+  document.getElementById('signups-list').innerHTML = `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Loading…</div>`;
+  showScreen('screen-signups');
+  await loadSignups();
   document.getElementById('signups-list').innerHTML = signups.length
     ? signups.map(signupCardHtml).join('')
     : `<div style="font-size:13px;color:var(--ink-faint);padding:8px 2px">No new signups.</div>`;
-  showScreen('screen-signups');
 }
 
 function completeSignup(id){
@@ -857,9 +870,22 @@ function completeSignup(id){
   openAddClient(false);
   pendingSignup = s;
   document.getElementById('new-client-name').value = s.name;
-  document.getElementById('new-client-phone').value = s.phone;
-  document.querySelectorAll('#new-client-org .trainer-opt').forEach(o => o.classList.toggle('selected', o.dataset.oid === s.orgId));
-  s.dids.forEach(didId => {
+  document.getElementById('new-client-phone').value = s.phone || '';
+  document.querySelectorAll('#new-client-org .trainer-opt').forEach(o => o.classList.toggle('selected', o.dataset.oid === s.org_id));
+
+  // openAddClient's picker defaults to the first trainer alphabetically — fine for a
+  // routine add, but wrong here: silently keeping that default would mean every signup
+  // with no stated preference quietly lands on whoever happens to sort first. If the
+  // client actually named someone, honor it. If not, clear the selection entirely so
+  // the admin has to make a real, visible choice instead of missing an accidental one.
+  const trainerOpts = document.querySelectorAll('#new-client-trainer .trainer-opt');
+  if(s.preferred_trainer_id){
+    trainerOpts.forEach(o => o.classList.toggle('selected', o.dataset.tid === s.preferred_trainer_id));
+  } else {
+    trainerOpts.forEach(o => o.classList.remove('selected'));
+  }
+
+  (s.requested_item_ids || []).forEach(didId => {
     const row = document.querySelector(`.did-check-row[data-did="${didId}"]`);
     if(row && !row.classList.contains('selected')){ row.classList.add('selected'); selectedDids.push(didId); }
   });
@@ -1111,9 +1137,12 @@ async function addClient(){
   const name = document.getElementById('new-client-name').value.trim();
   if(!name) return;
   const fromRoster = !document.getElementById('trainer-locked-block').classList.contains('hidden');
-  const trainerId = fromRoster
-    ? currentTrainerId
-    : document.querySelector('#new-client-trainer .trainer-opt.selected').dataset.tid;
+  const selectedTrainerOpt = document.querySelector('#new-client-trainer .trainer-opt.selected');
+  if(!fromRoster && !selectedTrainerOpt){
+    showToast('✗ Pick a trainer first');
+    return;
+  }
+  const trainerId = fromRoster ? currentTrainerId : selectedTrainerOpt.dataset.tid;
   const orgId = document.querySelector('#new-client-org .trainer-opt.selected').dataset.oid;
   const phone = document.getElementById('new-client-phone').value.trim() || null;
 
