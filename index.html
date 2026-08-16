@@ -453,7 +453,7 @@ async function init(){
   if(!CLIENT_TOKEN){ window.location.href = 'get-started.html'; return; }
   let rows;
   try {
-    rows = await sbReq(`checkin_clients?select=id,name,token,phone,pin,checkin_trainers(id,name),checkin_orgs(name)&token=eq.${encodeURIComponent(CLIENT_TOKEN)}`);
+    rows = await sbReq(`checkin_clients?select=id,name,token,phone,pin,checkin_trainers(id,name,email,token),checkin_orgs(name)&token=eq.${encodeURIComponent(CLIENT_TOKEN)}`);
   } catch(e){ showScreen('screen-error'); return; }
   if(!rows || !rows.length){ showScreen('screen-error'); return; }
   CLIENT = rows[0];
@@ -632,7 +632,23 @@ async function doSubmit(note){
     alert('Something went wrong saving your check-in — try again in a moment.');
     return;
   }
+  if(needsHelpChecked){
+    notifyTrainer(note); // fire-and-forget — a real check-in already saved either way
+  }
   await maybeCheckPeriodic(note);
+}
+
+function notifyTrainer(note){
+  const trainer = CLIENT.checkin_trainers;
+  if(!trainer || !trainer.email) return; // nothing to notify, don't block on it
+  fetch(`${SB_URL}/functions/v1/notify-trainer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SB_KEY}`, 'apikey': SB_KEY },
+    body: JSON.stringify({
+      trainerEmail: trainer.email, trainerName: trainer.name, trainerToken: trainer.token,
+      clientId: CLIENT.id, clientName: CLIENT.name, note: note || null
+    })
+  }).catch(e => { /* the check-in itself already saved — a failed email here shouldn't alarm the client */ });
 }
 
 async function maybeCheckPeriodic(note){
