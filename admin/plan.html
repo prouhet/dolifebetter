@@ -316,12 +316,25 @@ function fmtDate(iso){
 
 const CLIENT_ID = new URLSearchParams(window.location.search).get('id');
 const TRAINER_TOKEN = new URLSearchParams(window.location.search).get('t') || '';
+function isTrainerVerifiedOnThisDevice(token){
+  try { return localStorage.getItem(`trainer_verified_${token}`) === 'true'; }
+  catch(e){ return false; }
+}
 let CLIENT = null;
 let LIBRARY = [];
 let orgIdByKey = {}; // 'strong'/'premier' -> real org id, for the create-new-item form
 let assigned = [];
 
 async function init(){
+  // Same device-verification the main admin tool requires — this page never had its
+  // own gate for it, meaning it could be reached directly, bypassing the PIN entirely.
+  // Rather than duplicate that whole screen here, just check the same flag and send
+  // them to the real one if it's missing.
+  if(!isTrainerVerifiedOnThisDevice(TRAINER_TOKEN)){
+    window.location.href = `index.html?id=${TRAINER_TOKEN}`;
+    return;
+  }
+
   if(!CLIENT_ID){
     document.getElementById('client-name').textContent = 'No client specified';
     return;

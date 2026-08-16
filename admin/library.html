@@ -518,6 +518,10 @@ function renderLibrary(){
 }
 
 const CURRENT_TOKEN = new URLSearchParams(window.location.search).get('id') || '';
+function isTrainerVerifiedOnThisDevice(token){
+  try { return localStorage.getItem(`trainer_verified_${token}`) === 'true'; }
+  catch(e){ return false; }
+}
 function goToAdmin(){
   window.location.href = `index.html?id=${CURRENT_TOKEN}`;
 }
@@ -534,6 +538,14 @@ async function initLibrary(){
   const matched = CURRENT_TOKEN ? (trainers||[]).find(t => t.token === CURRENT_TOKEN) : null;
   if(!matched){
     showScreen('screen-denied');
+    return;
+  }
+
+  // Same device-verification the main admin tool requires — this page never had its
+  // own gate for it. Rather than duplicate that whole screen here, check the same
+  // flag and send them to the real one if it's missing.
+  if(!isTrainerVerifiedOnThisDevice(CURRENT_TOKEN)){
+    window.location.href = `index.html?id=${CURRENT_TOKEN}`;
     return;
   }
 
