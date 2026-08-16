@@ -267,7 +267,8 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
 
         <div class="field-block">
           <div class="field-label">Sub-category <span style="font-weight:400;color:var(--ink-faint)">— optional</span></div>
-          <input type="text" id="draft-subcategory" placeholder="e.g. Protein, Foundations">
+          <input type="text" id="draft-subcategory" list="subcategory-suggestions" placeholder="e.g. Protein, Foundations">
+          <datalist id="subcategory-suggestions"></datalist>
         </div>
 
         <div class="field-block">
@@ -493,7 +494,7 @@ function renderLibrary(){
   const list = document.getElementById('item-list');
   let html = '';
   const filterOrgId = orgFilter ? orgIdByKey[orgFilter] : null;
-  const visible = orgFilter ? library.filter(i => !i.orgId || i.orgId === filterOrgId) : library;
+  const visible = orgFilter ? library.filter(i => i.orgId === filterOrgId) : library;
   const cats = [...new Set(visible.map(i => i.category))]; // real categories present, whatever this org's taxonomy is
   cats.forEach(cat => {
     const items = visible.filter(item => item.category === cat);
@@ -567,6 +568,7 @@ function openEditItem(id){
 
   const orgKey = item.orgId === orgIdByKey.premier ? 'premier' : item.orgId === orgIdByKey.strong ? 'strong' : '';
   document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === orgKey));
+  updateSubcategorySuggestions(orgKey);
   document.getElementById('draft-category').value = item.category || '';
   document.getElementById('draft-subcategory').value = item.subCategory || '';
   document.getElementById('draft-name').value = item.name || '';
@@ -715,7 +717,18 @@ function addChoiceInput(value){
 document.getElementById('org-toggle').addEventListener('click', e => {
   const opt = e.target.closest('.type-opt'); if(!opt) return;
   document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o===opt));
+  updateSubcategorySuggestions(opt.dataset.org);
 });
+
+function updateSubcategorySuggestions(orgKey){
+  // Scoped to whichever org is currently selected in the form — so editing a Studio
+  // Strong item doesn't suggest Premier U's sub-categories (Protein, Foundations) and
+  // vice versa. "All orgs" shows everything, since a shared item could reasonably use any.
+  const targetOrgId = orgKey ? orgIdByKey[orgKey] : null;
+  const relevant = orgKey ? library.filter(i => i.orgId === targetOrgId) : library;
+  const subCats = [...new Set(relevant.map(i => i.subCategory).filter(Boolean))];
+  document.getElementById('subcategory-suggestions').innerHTML = subCats.map(s => `<option value="${s}">`).join('');
+}
 
 function openAddNewItem(){
   editingItemId = null;
@@ -725,6 +738,7 @@ function openAddNewItem(){
   document.getElementById('paste-stage').classList.remove('hidden');
   document.getElementById('draft-stage').classList.add('hidden');
   document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === ''));
+  updateSubcategorySuggestions('');
   document.getElementById('draft-category').value = '';
   document.getElementById('draft-subcategory').value = '';
   document.getElementById('draft-name').value = '';

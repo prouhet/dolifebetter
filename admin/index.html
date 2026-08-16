@@ -274,6 +274,29 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div style="font-size:14px;color:var(--ink-dim);line-height:1.5">This tool is only accessible with your own staff link. If you're a trainer at Studio Strong, use the link you were given — this page isn't reachable any other way.</div>
     </div>
 
+    <!-- SCREEN: TRAINER VERIFY (returning trainer, PIN already set) -->
+    <div id="screen-trainer-verify" class="hidden" style="padding-top:20px;max-width:340px">
+      <div style="font-size:22px;font-weight:600;margin-bottom:5px" id="trainer-verify-greeting"></div>
+      <div style="font-size:14px;color:var(--ink-dim);margin-bottom:24px" id="trainer-verify-setup-note">Enter your PIN to continue.</div>
+      <input type="password" inputmode="numeric" maxlength="4" id="trainer-verify-input" placeholder="0000" oninput="checkTrainerVerifyValid()"
+        style="width:100%;max-width:180px;margin:8px 0 6px;padding:16px;border-radius:16px;border:1.5px solid var(--surface-soft);background:var(--surface);font-family:'DM Sans',sans-serif;font-size:28px;font-weight:700;letter-spacing:0.3em;text-align:center;color:var(--ink);outline:none">
+      <div id="trainer-verify-error" class="hidden" style="font-size:13px;color:var(--care);margin-bottom:14px">That doesn't match — try again.</div>
+      <div id="trainer-verify-stuck" class="hidden" style="font-size:13px;color:var(--ink-dim);background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:12px 14px;margin-bottom:14px">Still stuck? Check with whoever manages the staff roster — they can reset your PIN.</div>
+      <button class="save-btn" id="trainer-verify-btn" style="max-width:320px;margin-top:14px" onclick="submitTrainerVerify()" disabled>Confirm</button>
+      <div style="font-size:12px;color:var(--ink-faint);margin-top:18px;max-width:300px">Just once per device — this protects real client data if this link is ever seen by someone else.</div>
+    </div>
+
+    <!-- SCREEN: TRAINER SETUP PIN (first time ever, no PIN set yet) -->
+    <div id="screen-trainer-setup-pin" class="hidden" style="padding-top:20px;max-width:340px">
+      <div style="font-size:22px;font-weight:600;margin-bottom:5px" id="trainer-setup-pin-greeting"></div>
+      <div style="font-size:14px;color:var(--ink-dim);margin-bottom:24px">First time here — pick 4 digits to protect this. You'll enter this each time on a new device.</div>
+      <input type="password" inputmode="numeric" maxlength="4" id="trainer-setup-pin-input" placeholder="0000" oninput="checkTrainerSetupPinValid()"
+        style="width:100%;max-width:180px;margin:8px 0 6px;padding:16px;border-radius:16px;border:1.5px solid var(--surface-soft);background:var(--surface);font-family:'DM Sans',sans-serif;font-size:28px;font-weight:700;letter-spacing:0.3em;text-align:center;color:var(--ink);outline:none">
+      <div id="trainer-setup-pin-error" class="hidden" style="font-size:13px;color:var(--care);margin-bottom:14px">Couldn't save that — try again.</div>
+      <button class="save-btn" id="trainer-setup-pin-btn" style="max-width:320px;margin-top:14px" onclick="submitTrainerSetupPin()" disabled>Set PIN &amp; Continue</button>
+      <div style="font-size:12px;color:var(--ink-faint);margin-top:18px;max-width:300px">This protects real client data — rosters, contact info, everything in this tool — if your link is ever seen by someone else.</div>
+    </div>
+
     <!-- SCREEN: MASTER LIST -->
     <div id="screen-master" class="hidden">
       <div class="back-link" onclick="openRoster(currentTrainerId, false)">← Back to my roster</div>
@@ -500,7 +523,7 @@ function toggleTheme(){applyTheme(!document.body.classList.contains('dark'));}
 applyTheme(false);
 
 function showScreen(id){
-  ['screen-denied','screen-master','screen-roster','screen-requests','screen-signups','screen-preferences','screen-reassign','screen-add-trainer','screen-add-client','screen-add-org'].forEach(s => {
+  ['screen-denied','screen-trainer-verify','screen-trainer-setup-pin','screen-master','screen-roster','screen-requests','screen-signups','screen-preferences','screen-reassign','screen-add-trainer','screen-add-client','screen-add-org'].forEach(s => {
     document.getElementById(s).classList.toggle('hidden', s!==id);
   });
   window.scrollTo(0, 0);
@@ -628,7 +651,7 @@ async function loadRealData(){
 
   trainers = (rawTrainers||[]).map(t => ({
     id: t.id, name: t.name, email: t.email, isAdmin: t.is_admin, token: t.token,
-    maxDidsPerDay: t.max_dids_per_day, archived: !!t.archived_at, orgIds: trainerOrgsByTrainer[t.id] || []
+    maxDidsPerDay: t.max_dids_per_day, archived: !!t.archived_at, orgIds: trainerOrgsByTrainer[t.id] || [], pin: t.pin
   }));
   orgs = (rawOrgs||[]).map(o => ({ id: o.id, name: o.name, archived: !!o.archived_at, isDefault: o.is_default }));
 
@@ -1375,6 +1398,27 @@ async function init(){
   }
 
   currentTrainerId = matched.id;
+
+  // Same one-time-per-device check as clients get, but trainers hold much higher-stakes
+  // access — full rosters, catalog edits, archiving — so this matters even more here.
+  // Unlike clients, there's no natural default (no phone number stored for trainers),
+  // so a trainer with no PIN yet gets a genuine "set one up" moment, not a pre-filled one.
+  if(!isTrainerVerifiedOnThisDevice(matched.token)){
+    document.getElementById('sim-banner').classList.add('hidden');
+    document.getElementById('trainer-verify-greeting').textContent = `Hey ${matched.name} 👋`;
+    document.getElementById('trainer-setup-pin-greeting').textContent = `Hey ${matched.name} 👋`;
+    if(matched.pin){
+      showScreen('screen-trainer-verify');
+    } else {
+      showScreen('screen-trainer-setup-pin');
+    }
+    return;
+  }
+
+  continueAfterTrainerVerify(matched);
+}
+
+function continueAfterTrainerVerify(matched){
   document.getElementById('sim-banner').classList.add('signed-in');
   document.getElementById('sim-pills').innerHTML = `<div class="sim-pill active" style="cursor:default">${matched.name}${matched.isAdmin ? ' (admin)' : ''}</div>`;
 
@@ -1385,6 +1429,54 @@ async function init(){
   renderOrgPicker();
   updateSignupsLink();
   openRoster(currentTrainerId, false);
+}
+
+function isTrainerVerifiedOnThisDevice(token){
+  try { return localStorage.getItem(`trainer_verified_${token}`) === 'true'; }
+  catch(e){ return false; }
+}
+function markTrainerVerifiedOnThisDevice(token){
+  try { localStorage.setItem(`trainer_verified_${token}`, 'true'); } catch(e){}
+}
+
+let trainerVerifyFailCount = 0;
+function checkTrainerVerifyValid(){
+  document.getElementById('trainer-verify-btn').disabled = document.getElementById('trainer-verify-input').value.trim().length !== 4;
+  document.getElementById('trainer-verify-error').classList.add('hidden');
+}
+async function submitTrainerVerify(){
+  const matched = trainers.find(t => t.token === CURRENT_TOKEN);
+  const entered = document.getElementById('trainer-verify-input').value.trim();
+  if(entered === matched.pin){
+    markTrainerVerifiedOnThisDevice(matched.token);
+    document.getElementById('sim-banner').classList.remove('hidden');
+    continueAfterTrainerVerify(matched);
+  } else {
+    trainerVerifyFailCount++;
+    document.getElementById('trainer-verify-error').classList.remove('hidden');
+    document.getElementById('trainer-verify-input').value = '';
+    document.getElementById('trainer-verify-btn').disabled = true;
+    if(trainerVerifyFailCount >= 3) document.getElementById('trainer-verify-stuck').classList.remove('hidden');
+  }
+}
+
+function checkTrainerSetupPinValid(){
+  document.getElementById('trainer-setup-pin-btn').disabled = document.getElementById('trainer-setup-pin-input').value.trim().length !== 4;
+}
+async function submitTrainerSetupPin(){
+  const matched = trainers.find(t => t.token === CURRENT_TOKEN);
+  const newPin = document.getElementById('trainer-setup-pin-input').value.trim();
+  if(newPin.length !== 4) return;
+  try {
+    await sbReq(`checkin_trainers?id=eq.${matched.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({pin: newPin})});
+  } catch(e){
+    document.getElementById('trainer-setup-pin-error').classList.remove('hidden');
+    return;
+  }
+  matched.pin = newPin;
+  markTrainerVerifiedOnThisDevice(matched.token);
+  document.getElementById('sim-banner').classList.remove('hidden');
+  continueAfterTrainerVerify(matched);
 }
 
 function renderSimPills(){
