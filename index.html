@@ -164,7 +164,7 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
   <div id="screen-verify" class="screen hidden" style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:20px 4px 40px">
     <div class="greeting" id="verify-greeting"></div>
     <div class="subline">Your PIN is the last 4 digits of your phone number — unless you've changed it.</div>
-    <input type="tel" inputmode="numeric" maxlength="4" id="verify-input" placeholder="0000" oninput="checkVerifyValid()"
+    <input type="password" inputmode="numeric" maxlength="4" id="verify-input" placeholder="0000" oninput="checkVerifyValid()"
       style="width:100%;max-width:180px;margin:8px 0 6px;padding:16px;border-radius:16px;border:1.5px solid var(--surface-soft);background:var(--surface);font-family:'DM Sans',sans-serif;font-size:28px;font-weight:700;letter-spacing:0.3em;text-align:center;color:var(--ink);outline:none">
     <div id="verify-error" class="hidden" style="font-size:13px;color:var(--care);margin-bottom:14px">That doesn't match — try again, or check the link your trainer sent.</div>
     <div id="verify-stuck" class="hidden" style="font-size:13px;color:var(--ink-dim);background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:12px 14px;margin-bottom:14px">Still stuck? Text <span id="verify-stuck-name">your trainer</span> — they can look up what's on file and get you sorted.</div>
@@ -231,6 +231,7 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
     <div class="inspire-block">
       <div class="inspire-eyebrow">🌱</div>
       <div class="inspire-text" id="inspire-text"></div>
+      <div id="inspire-author" class="hidden" style="font-size:12px;color:var(--ink-faint);margin-top:6px;font-style:normal"></div>
     </div>
     <a class="stats-link" href="client_stats_page.html">See your stats →</a>
     <div class="edit-link" id="edit-link" onclick="editCheckin()">Made a mistake? Edit today's check-in</div>
@@ -689,12 +690,19 @@ async function showConfirm(isSupport, note){
 
 async function renderInspireBlock(){
   const textEl = document.getElementById('inspire-text');
+  const authorEl = document.getElementById('inspire-author');
+  authorEl.classList.add('hidden');
   try {
     const count = await sbCount('checkin_quotes');
     if(count > 0){
       const offset = Math.floor(Math.random() * count);
-      const rows = await sbReq(`checkin_quotes?select=text&limit=1&offset=${offset}`);
-      textEl.textContent = (rows && rows[0]) ? rows[0].text : "You showed up. That's the whole game.";
+      const rows = await sbReq(`checkin_quotes?select=text,author&limit=1&offset=${offset}`);
+      const row = rows && rows[0];
+      textEl.textContent = row ? row.text : "You showed up. That's the whole game.";
+      if(row && row.author){
+        authorEl.textContent = `— ${row.author}`;
+        authorEl.classList.remove('hidden');
+      }
     } else {
       textEl.textContent = "You showed up. That's the whole game.";
     }

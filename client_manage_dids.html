@@ -125,7 +125,7 @@ textarea::placeholder{color:var(--ink-faint)}
   <div id="screen-verify" class="screen" style="padding-top:20px">
     <div class="page-title" id="verify-greeting"></div>
     <div class="page-sub">Your PIN is the last 4 digits of your phone number — unless you've changed it.</div>
-    <input type="tel" inputmode="numeric" maxlength="4" id="verify-input" placeholder="0000" oninput="checkVerifyValid()"
+    <input type="password" inputmode="numeric" maxlength="4" id="verify-input" placeholder="0000" oninput="checkVerifyValid()"
       style="width:100%;max-width:180px;margin:8px 0 6px;padding:16px;border-radius:16px;border:1.5px solid var(--surface-soft);background:var(--surface);font-family:'DM Sans',sans-serif;font-size:28px;font-weight:700;letter-spacing:0.3em;text-align:center;color:var(--ink);outline:none">
     <div id="verify-error" class="hidden" style="font-size:13px;color:var(--care);margin-bottom:14px">That doesn't match — try again, or check the link your trainer sent.</div>
     <div id="verify-stuck" class="hidden" style="font-size:13px;color:var(--ink-dim);background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:12px 14px;margin-bottom:14px">Still stuck? Text <span id="verify-stuck-name">your trainer</span> — they can look up what's on file and get you sorted.</div>
@@ -138,7 +138,7 @@ textarea::placeholder{color:var(--ink-faint)}
     <div class="back-link" onclick="showScreen('screen-mine')">← Back</div>
     <div class="page-title">Change my PIN</div>
     <div class="page-sub">Pick 4 digits that are easy for you to remember.</div>
-    <input type="tel" inputmode="numeric" maxlength="4" id="new-pin-input" placeholder="0000" oninput="checkNewPinValid()"
+    <input type="password" inputmode="numeric" maxlength="4" id="new-pin-input" placeholder="0000" oninput="checkNewPinValid()"
       style="width:100%;max-width:180px;margin:8px 0 6px;padding:16px;border-radius:16px;border:1.5px solid var(--surface-soft);background:var(--surface);font-family:'DM Sans',sans-serif;font-size:28px;font-weight:700;letter-spacing:0.3em;text-align:center;color:var(--ink);outline:none">
     <div id="new-pin-error" class="hidden" style="font-size:13px;color:var(--care);margin-bottom:14px">Needs to be exactly 4 digits.</div>
     <button class="cta" id="new-pin-btn" style="max-width:320px;margin-top:14px" onclick="saveNewPin()" disabled>Save PIN</button>
