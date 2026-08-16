@@ -93,6 +93,7 @@ textarea::placeholder{color:var(--ink-faint)}
 .mic-btn:hover{border-color:var(--teal);color:var(--teal-deep)}
 .mic-btn.recording{background:rgba(220,50,50,0.12);border-color:rgba(220,50,50,.5);color:#c94040;animation:pulse-mic 1.2s ease-in-out infinite}
 .mic-btn.processing{background:var(--teal-tint);border-color:rgba(20,156,189,.5);color:var(--teal-deep);animation:pulse-mic .8s ease-in-out infinite}
+.mic-status{font-size:12.5px;color:var(--care);margin-top:8px}
 @keyframes pulse-mic{0%,100%{opacity:1}50%{opacity:.5}}
 
 .cta{width:100%;padding:16px;border-radius:100px;border:none;background:var(--teal);color:#fff;
@@ -208,14 +209,15 @@ textarea::placeholder{color:var(--ink-faint)}
     <div class="page-title" style="font-size:19px">Tell us what you're thinking</div>
     <div class="page-sub">Talk it through or type it — whatever's easier.</div>
     <div class="confirm-block">
-      <textarea id="suggest-text" placeholder="What would you like to start tracking?"></textarea>
+      <textarea id="suggest-text" placeholder="What would you like to start tracking?" oninput="checkSuggestValid()"></textarea>
       <button class="mic-btn" id="mic-btn" onclick="toggleMic()" title="Voice input">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
         </svg>
       </button>
+      <div id="mic-status" class="mic-status hidden">Didn't catch that — try again, or just type below</div>
     </div>
-    <button class="cta" onclick="sendRequest('suggest')">Send to My Trainer</button>
+    <button class="cta" id="suggest-send-btn" onclick="sendRequest('suggest')" disabled>Send to My Trainer</button>
   </div>
 
   <!-- SCREEN: SENT -->
@@ -370,7 +372,11 @@ function openAddConfirm(itemId, name){
 
 function openSuggest(){
   document.getElementById('suggest-text').value = '';
+  document.getElementById('suggest-send-btn').disabled = true;
   showScreen('screen-suggest');
+}
+function checkSuggestValid(){
+  document.getElementById('suggest-send-btn').disabled = !document.getElementById('suggest-text').value.trim();
 }
 
 // ─── Voice input — same real mechanism as index.html / capture.html ────────
@@ -382,7 +388,9 @@ function getBestMimeType(){
 }
 async function toggleMic(){
   const btn = document.getElementById('mic-btn');
+  const statusEl = document.getElementById('mic-status');
   if(isRecording){ mediaRecorder?.stop(); return; }
+  if(statusEl) statusEl.classList.add('hidden');
 
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
@@ -403,7 +411,7 @@ async function toggleMic(){
     btn.classList.remove('recording');
     stream.getTracks().forEach(t => t.stop());
     const blob = new Blob(audioChunks, { type: actualMime });
-    if(blob.size < 1000){ return; }
+    if(blob.size < 1000){ if(statusEl) statusEl.classList.remove('hidden'); return; }
     btn.classList.add('processing');
     try {
       const res = await fetch(`${SB_URL}/functions/v1/transcribe?key=${encodeURIComponent(CHECKIN_VOICE_KEY)}`,
@@ -415,8 +423,9 @@ async function toggleMic(){
         const ta = document.getElementById('suggest-text');
         const existing = ta.value.trim();
         ta.value = existing ? existing + ' ' + transcript : transcript;
-      }
-    } catch(e){ /* silent — they can still type */ }
+        ta.dispatchEvent(new Event('input'));
+      } else if(statusEl){ statusEl.classList.remove('hidden'); }
+    } catch(e){ if(statusEl) statusEl.classList.remove('hidden'); }
     finally { btn.classList.remove('processing'); }
   };
 

@@ -130,6 +130,10 @@ input::placeholder{color:var(--ink-faint)}
         <div class="pill-opt" data-src="premier">Premier U</div>
       </div>
     </div>
+    <div class="field-block">
+      <div class="field-label">Preferred trainer <span style="font-weight:400;color:var(--ink-faint)">— totally fine to skip this</span></div>
+      <div class="pill-select" id="signup-trainer-pref"><div class="pill-opt selected" data-tid="">I don't know / no preference</div></div>
+    </div>
 
     <button class="cta" id="info-next-btn" onclick="goToDids()" disabled>Continue</button>
   </div>
@@ -150,11 +154,12 @@ input::placeholder{color:var(--ink-faint)}
     <div class="back-link" onclick="showScreen('screen-dids')">← Back</div>
     <div class="page-title">Tell us what you have in mind</div>
     <div class="page-sub">Say it or type it — your trainer will help turn it into something trackable.</div>
-    <textarea id="suggest-text" placeholder="e.g. I want to cut back on late-night snacking…" style="width:100%;min-height:110px;border-radius:14px;border:1.5px solid var(--surface-soft);background:var(--surface);padding:14px 16px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);outline:none;resize:none;margin-bottom:12px"></textarea>
-    <button class="mic-btn" id="suggest-mic-btn" onclick="toggleMic()" style="width:44px;height:44px;border-radius:50%;background:var(--surface);border:1.5px solid var(--surface-soft);color:var(--ink-dim);cursor:pointer;display:flex;align-items:center;justify-content:center;margin-bottom:16px">
+    <textarea id="suggest-text" placeholder="e.g. I want to cut back on late-night snacking…" style="width:100%;min-height:110px;border-radius:14px;border:1.5px solid var(--surface-soft);background:var(--surface);padding:14px 16px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);outline:none;resize:none;margin-bottom:12px" oninput="checkSuggestValid()"></textarea>
+    <button class="mic-btn" id="suggest-mic-btn" onclick="toggleMic()" style="width:44px;height:44px;border-radius:50%;background:var(--surface);border:1.5px solid var(--surface-soft);color:var(--ink-dim);cursor:pointer;display:flex;align-items:center;justify-content:center;margin-bottom:8px">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
     </button>
-    <button class="cta" onclick="addSuggestionAndContinue()">Add this</button>
+    <div id="suggest-mic-status" class="hidden" style="font-size:12.5px;color:var(--care);margin-bottom:16px">Didn't catch that — try again, or just type below</div>
+    <button class="cta" id="suggest-add-btn" onclick="addSuggestionAndContinue()" disabled>Add this</button>
   </div>
 
   <!-- SCREEN 5: REVIEW -->
@@ -171,6 +176,8 @@ input::placeholder{color:var(--ink-faint)}
       <div id="review-phone" style="font-size:14px;font-weight:600;margin-bottom:12px"></div>
       <div class="field-label" style="margin-bottom:4px">Interested in</div>
       <div id="review-dids" style="font-size:14px;font-weight:600;line-height:1.6"></div>
+      <div class="field-label" style="margin:12px 0 4px">Preferred trainer</div>
+      <div id="review-trainer" style="font-size:14px;font-weight:600"></div>
     </div>
 
     <button class="cta" onclick="submitSignup()">Send to a Trainer</button>
@@ -239,6 +246,7 @@ let orgLookup = {}; // 'strong'/'premier' -> real org id
 let DID_CATALOG = [];
 let selectedDids = [];
 let selectedOrgId = null;
+let selectedTrainerId = null; // null = "I don't know / no preference" — a real, valid answer
 let suggestionText = null; // holds a client-typed suggestion if they add one
 
 const orgsLoadedPromise = (async () => {
@@ -250,6 +258,24 @@ const orgsLoadedPromise = (async () => {
     });
   } catch(e){ /* selectedOrgId just falls back to null if this never resolves */ }
 })();
+
+(async () => {
+  try {
+    const rows = await sbReq('checkin_trainers?select=id,name&archived_at=is.null&order=name');
+    const container = document.getElementById('signup-trainer-pref');
+    // Real names appended after the existing "no preference" option — that one stays
+    // first and stays the default, since a brand-new person has no way to know staff
+    // names and shouldn't have to guess.
+    container.insertAdjacentHTML('beforeend', (rows||[]).map(t =>
+      `<div class="pill-opt" data-tid="${t.id}">${t.name}</div>`
+    ).join(''));
+  } catch(e){ /* the "no preference" option alone is still a complete, valid picker */ }
+})();
+document.getElementById('signup-trainer-pref').addEventListener('click', e => {
+  const opt = e.target.closest('.pill-opt'); if(!opt) return;
+  document.querySelectorAll('#signup-trainer-pref .pill-opt').forEach(o => o.classList.toggle('selected', o===opt));
+  selectedTrainerId = opt.dataset.tid || null;
+});
 
 async function goToDids(){
   await orgsLoadedPromise; // make sure orgLookup is actually populated before reading it —
@@ -288,7 +314,7 @@ function renderDidsList(){
       <div class="did-checkbox" onclick="toggleDid('${item.id}')"></div>
     </div>`;
   });
-  html += `<div class="did-check-row" style="border-style:dashed" onclick="showScreen('screen-suggest')">
+  html += `<div class="did-check-row" style="border-style:dashed" onclick="openSuggestScreen()">
     <div class="did-icon reflection">💬</div>
     <div class="did-check-name">None of these — tell us what you have in mind</div>
   </div>`;
@@ -322,7 +348,9 @@ function getBestMimeType(){
 }
 async function toggleMic(){
   const btn = document.getElementById('suggest-mic-btn');
+  const statusEl = document.getElementById('suggest-mic-status');
   if(isRecording){ mediaRecorder?.stop(); return; }
+  if(statusEl) statusEl.classList.add('hidden');
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
   catch(e){ alert('Microphone access denied — you can still type instead.'); return; }
@@ -336,7 +364,7 @@ async function toggleMic(){
     isRecording = false; btn.classList.remove('recording');
     stream.getTracks().forEach(t => t.stop());
     const blob = new Blob(audioChunks, { type: actualMime });
-    if(blob.size < 1000) return;
+    if(blob.size < 1000){ if(statusEl) statusEl.classList.remove('hidden'); return; }
     btn.classList.add('processing');
     try {
       const res = await fetch(`${SB_URL}/functions/v1/transcribe?key=${encodeURIComponent(CHECKIN_VOICE_KEY)}`,
@@ -347,13 +375,21 @@ async function toggleMic(){
       if(transcript){
         const ta = document.getElementById('suggest-text');
         ta.value = ta.value.trim() ? ta.value.trim() + ' ' + transcript : transcript;
-      }
-    } catch(e){ /* silent — they can still type */ }
+        ta.dispatchEvent(new Event('input'));
+      } else if(statusEl){ statusEl.classList.remove('hidden'); }
+    } catch(e){ if(statusEl) statusEl.classList.remove('hidden'); }
     finally { btn.classList.remove('processing'); }
   };
   mediaRecorder.start(250);
   isRecording = true;
   btn.classList.add('recording');
+}
+function openSuggestScreen(){
+  document.getElementById('suggest-add-btn').disabled = !document.getElementById('suggest-text').value.trim();
+  showScreen('screen-suggest');
+}
+function checkSuggestValid(){
+  document.getElementById('suggest-add-btn').disabled = !document.getElementById('suggest-text').value.trim();
 }
 function addSuggestionAndContinue(){
   const text = document.getElementById('suggest-text').value.trim();
@@ -367,6 +403,8 @@ function goToReview(){
   const names = DID_CATALOG.filter(d => selectedDids.includes(d.id)).map(d => d.name);
   if(suggestionText) names.push(`"${suggestionText}"`);
   document.getElementById('review-dids').textContent = names.length ? names.join(', ') : 'Open to suggestions';
+  const trainerOpt = document.querySelector('#signup-trainer-pref .pill-opt.selected');
+  document.getElementById('review-trainer').textContent = trainerOpt ? trainerOpt.textContent : "I don't know / no preference";
   showScreen('screen-review');
 }
 
@@ -378,10 +416,10 @@ async function submitSignup(){
   try {
     await sbReq('checkin_signups', { method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({
       name, phone, org_id: selectedOrgId, requested_item_ids: selectedDids.length ? selectedDids : null,
-      status: 'pending'
+      preferred_trainer_id: selectedTrainerId, note, status: 'pending'
     }) });
   } catch(e){
-    // Older schema without requested_item_ids typing, or note field missing — try a safer minimal payload
+    // Older schema without one of the newer columns — fall back to the safe minimal payload
     try {
       await sbReq('checkin_signups', { method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({
         name, phone, org_id: selectedOrgId, status: 'pending'
