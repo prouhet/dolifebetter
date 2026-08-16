@@ -313,6 +313,13 @@ function fmtDate(iso){
   const d = new Date(iso + 'T12:00:00');
   return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
 }
+function localISO(d){
+  // toISOString() converts to UTC first, which silently rolls the date forward during
+  // roughly 6-7pm to midnight local time (Central) — this uses the browser's own local
+  // date fields instead.
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 
 const CLIENT_ID = new URLSearchParams(window.location.search).get('id');
 const TRAINER_TOKEN = new URLSearchParams(window.location.search).get('t') || '';
@@ -725,7 +732,7 @@ async function assignItem(){
       // Never overwrite the old row in place — close it out with today's date, then
       // open a fresh row. This is exactly what makes goal history real: each change
       // becomes its own entry instead of erasing what came before.
-      const today = new Date().toISOString().slice(0,10);
+      const today = localISO(new Date());
       await sbReq(`checkin_assignments?id=eq.${editingAssignmentId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({effective_to: today})});
       await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
     } else {
