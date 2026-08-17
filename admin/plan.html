@@ -168,6 +168,31 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <div class="client-meta" id="client-meta"></div>
         </div>
       </div>
+      <div style="display:flex;gap:18px;margin:-8px 0 20px">
+        <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="showClientLink()">🔗 Get their link</div>
+        <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="openChangeTrainer()">↔️ Change trainer</div>
+      </div>
+
+      <div id="link-modal" class="hidden" style="position:fixed;inset:0;background:rgba(20,32,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px" onclick="if(event.target===this)closeClientLinkModal()">
+        <div style="background:var(--surface);border-radius:16px;padding:22px;max-width:320px;width:100%">
+          <div style="font-size:16px;font-weight:700;margin-bottom:4px" id="link-modal-name"></div>
+          <div style="font-size:13px;color:var(--ink-dim);margin-bottom:12px">Text them this link — it's just for them.</div>
+          <div style="background:var(--bg);border:1.5px solid var(--surface-soft);border-radius:12px;padding:12px 14px;margin-bottom:14px;word-break:break-all;font-size:13px;color:var(--ink-dim);font-family:monospace" id="link-modal-text"></div>
+          <button class="save-btn" id="link-modal-copy-btn" onclick="copyClientPlanLink()">Copy Link</button>
+          <div style="text-align:center;margin-top:12px;font-size:13px;color:var(--ink-dim);cursor:pointer" onclick="closeClientLinkModal()">Close</div>
+        </div>
+      </div>
+
+      <div id="trainer-modal" class="hidden" style="position:fixed;inset:0;background:rgba(20,32,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px" onclick="if(event.target===this)closeChangeTrainerModal()">
+        <div style="background:var(--surface);border-radius:16px;padding:22px;max-width:320px;width:100%">
+          <div style="font-size:16px;font-weight:700;margin-bottom:4px" id="trainer-modal-name"></div>
+          <div style="font-size:13px;color:var(--ink-dim);margin-bottom:14px">Move them to a different trainer within the same org.</div>
+          <div id="trainer-modal-list"></div>
+          <div id="trainer-modal-empty" class="hidden" style="font-size:13px;color:var(--ink-faint);margin-bottom:14px">No other trainers in this org yet.</div>
+          <div style="text-align:center;margin-top:8px;font-size:13px;color:var(--ink-dim);cursor:pointer" onclick="closeChangeTrainerModal()">Cancel</div>
+        </div>
+      </div>
+      </div>
 
       <div class="section-label">Assigned dids</div>
       <div id="assigned-list"></div>
@@ -308,6 +333,76 @@ async function sbReq(path, opts = {}) {
   const text = await r.text();
   return text ? JSON.parse(text) : null;
 }
+async function openChangeTrainer(){
+  document.getElementById('trainer-modal-name').textContent = `Move ${CLIENT.name.split(' ')[0]}`;
+  document.getElementById('trainer-modal-list').innerHTML = '<div style="font-size:13px;color:var(--ink-faint)">Loading…</div>';
+  document.getElementById('trainer-modal-empty').classList.add('hidden');
+  document.getElementById('trainer-modal').classList.remove('hidden');
+
+  let eligible = [];
+  try {
+    const [allTrainers, allTrainerOrgs] = await Promise.all([
+      sbReq('checkin_trainers?select=id,name&archived_at=is.null'),
+      sbReq('checkin_trainer_orgs?select=trainer_id,org_id')
+    ]);
+    const orgsByTrainer = {};
+    (allTrainerOrgs||[]).forEach(r => { (orgsByTrainer[r.trainer_id] = orgsByTrainer[r.trainer_id]||[]).push(r.org_id); });
+    // Same org, or genuinely unrestricted (no org rows at all) — same principle used
+    // everywhere else: never offer a trainer who isn't actually part of this org.
+    eligible = (allTrainers||[]).filter(t => {
+      if(t.id === CLIENT.trainer_id) return false;
+      const myOrgs = orgsByTrainer[t.id] || [];
+      return myOrgs.length === 0 || myOrgs.includes(CLIENT.org_id);
+    });
+  } catch(e){
+    document.getElementById('trainer-modal-list').innerHTML = '<div style="font-size:13px;color:var(--care)">Could not load trainers — try again.</div>';
+    return;
+  }
+
+  if(!eligible.length){
+    document.getElementById('trainer-modal-list').innerHTML = '';
+    document.getElementById('trainer-modal-empty').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('trainer-modal-list').innerHTML = eligible.map(t => `
+    <div style="padding:12px 14px;border-radius:12px;border:1.5px solid var(--surface-soft);margin-bottom:8px;cursor:pointer;font-size:14px;font-weight:600" onclick="confirmChangeTrainer('${t.id}','${t.name.replace(/'/g,"\\'")}')">${t.name}</div>
+  `).join('');
+}
+
+async function confirmChangeTrainer(newTrainerId, newTrainerName){
+  try {
+    await sbReq(`checkin_clients?id=eq.${CLIENT.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({trainer_id: newTrainerId})});
+  } catch(e){
+    showToast('✗ Could not move — try again');
+    return;
+  }
+  CLIENT.trainer_id = newTrainerId;
+  document.getElementById('client-meta').innerHTML = `<span class="badge premier">${CLIENT.checkin_orgs?.name||'—'}</span><span>· Trainer: ${newTrainerName}</span>`;
+  closeChangeTrainerModal();
+  showToast(`✓ Moved to ${newTrainerName.split(' ')[0]}`);
+}
+
+function closeChangeTrainerModal(){
+  document.getElementById('trainer-modal').classList.add('hidden');
+}
+
+function showClientLink(){
+  document.getElementById('link-modal-name').textContent = `${CLIENT.name.split(' ')[0]}'s link`;
+  document.getElementById('link-modal-text').textContent = `https://dolifebetter.fit/?id=${CLIENT.token}`;
+  document.getElementById('link-modal-copy-btn').textContent = 'Copy Link';
+  document.getElementById('link-modal').classList.remove('hidden');
+}
+function closeClientLinkModal(){
+  document.getElementById('link-modal').classList.add('hidden');
+}
+function copyClientPlanLink(){
+  const text = document.getElementById('link-modal-text').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    document.getElementById('link-modal-copy-btn').textContent = '✓ Copied';
+    setTimeout(() => { document.getElementById('link-modal-copy-btn').textContent = 'Copy Link'; }, 1500);
+  }).catch(() => { /* clipboard permissions can vary — the link is still visible to select manually */ });
+}
+
 function fmtDate(iso){
   if(!iso) return 'now';
   const d = new Date(iso + 'T12:00:00');

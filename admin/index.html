@@ -424,6 +424,15 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
     </div>
 
     <!-- SCREEN: ADD CLIENT -->
+    <div id="screen-client-link" class="hidden" style="padding-top:20px">
+      <div style="font-size:32px;margin-bottom:14px">🌱</div>
+      <div class="page-title" style="font-size:19px" id="client-link-name"></div>
+      <div class="page-sub">Text them this link — it's just for them.</div>
+      <div style="background:var(--surface);border:1.5px solid var(--surface-soft);border-radius:14px;padding:14px 16px;margin-bottom:14px;word-break:break-all;font-size:14px;color:var(--ink-dim);font-family:monospace" id="client-link-text"></div>
+      <button class="save-btn" id="client-link-copy-btn" onclick="copyClientLink()">Copy Link</button>
+      <div style="text-align:center;margin-top:16px;font-size:13.5px;color:var(--ink-dim);cursor:pointer" onclick="dismissClientLink()">Done</div>
+    </div>
+
     <div id="screen-add-client" class="hidden draft-wrap">
       <div class="back-link" id="add-client-back" onclick="showScreen('screen-master')">← Back</div>
       <div class="page-title" style="font-size:19px">Add a client</div>
@@ -538,7 +547,7 @@ function showScreen(id){
       id = 'screen-roster';
     }
   }
-  ['screen-denied','screen-trainer-verify','screen-trainer-setup-pin','screen-master','screen-roster','screen-requests','screen-signups','screen-preferences','screen-reassign','screen-add-trainer','screen-add-client','screen-add-org'].forEach(s => {
+  ['screen-denied','screen-trainer-verify','screen-trainer-setup-pin','screen-master','screen-roster','screen-requests','screen-signups','screen-preferences','screen-reassign','screen-add-trainer','screen-add-client','screen-client-link','screen-add-org'].forEach(s => {
     document.getElementById(s).classList.toggle('hidden', s!==id);
   });
   window.scrollTo(0, 0);
@@ -1199,6 +1208,22 @@ async function addTrainer(){
   showToast('✓ Trainer added');
 }
 
+let pendingClientLinkReturn = null; // where to go once they dismiss the link screen
+
+function copyClientLink(){
+  const text = document.getElementById('client-link-text').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    document.getElementById('client-link-copy-btn').textContent = '✓ Copied';
+    setTimeout(() => { document.getElementById('client-link-copy-btn').textContent = 'Copy Link'; }, 1500);
+  }).catch(() => { /* clipboard permissions can vary — the link is still visible to select manually */ });
+}
+
+function dismissClientLink(){
+  const goTo = pendingClientLinkReturn;
+  pendingClientLinkReturn = null;
+  if(goTo === 'roster'){ openRoster(currentTrainerId, false); } else { showScreen('screen-master'); }
+}
+
 async function addClient(){
   const name = document.getElementById('new-client-name').value.trim();
   if(!name) return;
@@ -1247,7 +1272,11 @@ async function addClient(){
   renderAllClients();
   document.getElementById('new-client-name').value = '';
   document.getElementById('new-client-phone').value = '';
-  if(fromRoster){ openRoster(trainerId, false); } else { showScreen('screen-master'); }
+  pendingClientLinkReturn = fromRoster ? 'roster' : 'master';
+  document.getElementById('client-link-name').textContent = `${name.split(' ')[0]}'s link`;
+  document.getElementById('client-link-text').textContent = `https://dolifebetter.fit/?id=${newClient.token}`;
+  document.getElementById('client-link-copy-btn').textContent = 'Copy Link';
+  showScreen('screen-client-link');
   const didsMsg = selectedDids.length ? ` with ${selectedDids.length} did${selectedDids.length===1?'':'s'}` : '';
   if(wasSignup){
     await updateSignupsLink();
