@@ -423,6 +423,7 @@ async function sbReq(path, opts = {}) {
 let library = [];      // real checkin_library_items, fetched at init
 let orgLookup = {};    // real org id -> short label (Studio Strong / Premier U)
 let orgIdByKey = {};   // 'strong'/'premier' -> real org id, for the add/edit form
+let myOrgIds = [];      // the currently signed-in trainer's real org affiliations
 
 async function loadLibrary(){
   const [items, orgs] = await Promise.all([
@@ -549,6 +550,11 @@ async function initLibrary(){
     return;
   }
 
+  try {
+    const myOrgRows = await sbReq(`checkin_trainer_orgs?select=org_id&trainer_id=eq.${matched.id}`);
+    myOrgIds = (myOrgRows||[]).map(r => r.org_id);
+  } catch(e){ myOrgIds = []; }
+
   try { await loadLibrary(); }
   catch(e){ document.getElementById('item-list').innerHTML = `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Could not load — check connection.</div>`; showScreen('screen-library'); return; }
   renderLibrary();
@@ -579,6 +585,15 @@ function openEditItem(id){
   document.getElementById('draft-stage').classList.remove('hidden');
 
   const orgKey = item.orgId === orgIdByKey.premier ? 'premier' : item.orgId === orgIdByKey.strong ? 'strong' : '';
+  const restrictedOrgKey = applyOrgAccessRestriction();
+  const editingOutOfScope = restrictedOrgKey !== null && orgKey !== restrictedOrgKey;
+  if(editingOutOfScope){
+    // This item belongs to an org this trainer isn't part of — they can still view and
+    // edit its content, but reassigning its org is exactly the cross-org action being
+    // restricted, so show every option but lock all of them rather than letting the
+    // toggle silently save a different org than the one they opened.
+    document.querySelectorAll('#org-toggle .type-opt').forEach(o => { o.classList.remove('hidden'); o.style.pointerEvents = 'none'; o.style.opacity = '.5'; });
+  }
   document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === orgKey));
   updateSubcategorySuggestions(orgKey);
   document.getElementById('draft-category').value = item.category || '';
@@ -742,6 +757,25 @@ function updateSubcategorySuggestions(orgKey){
   document.getElementById('subcategory-suggestions').innerHTML = subCats.map(s => `<option value="${s}">`).join('');
 }
 
+function applyOrgAccessRestriction(){
+  // A trainer tied to just one org shouldn't be able to tag an item for the other org,
+  // or for "All orgs" — that would affect a client base they have no actual role with.
+  // A trainer with no org restriction at all (dual, or none set) keeps full access.
+  const allOrgOpts = document.querySelectorAll('#org-toggle .type-opt');
+  allOrgOpts.forEach(o => { o.style.pointerEvents = ''; o.style.opacity = ''; }); // clear any prior lock state first
+  if(myOrgIds.length !== 1){
+    allOrgOpts.forEach(o => o.classList.remove('hidden'));
+    return null;
+  }
+  const myOrgId = myOrgIds[0];
+  const myKey = myOrgId === orgIdByKey.premier ? 'premier' : myOrgId === orgIdByKey.strong ? 'strong' : null;
+  allOrgOpts.forEach(o => {
+    const allowed = o.dataset.org === myKey;
+    o.classList.toggle('hidden', !allowed);
+  });
+  return myKey;
+}
+
 function openAddNewItem(){
   editingItemId = null;
   document.getElementById('screen-add-heading').textContent = 'Add a check-in item';
@@ -749,8 +783,9 @@ function openAddNewItem(){
   document.getElementById('draft-note-callout').classList.add('hidden');
   document.getElementById('paste-stage').classList.remove('hidden');
   document.getElementById('draft-stage').classList.add('hidden');
-  document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === ''));
-  updateSubcategorySuggestions('');
+  const restrictedOrgKey = applyOrgAccessRestriction();
+  document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === (restrictedOrgKey || '')));
+  updateSubcategorySuggestions(restrictedOrgKey || '');
   document.getElementById('draft-category').value = '';
   document.getElementById('draft-subcategory').value = '';
   document.getElementById('draft-name').value = '';

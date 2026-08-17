@@ -330,6 +330,7 @@ function isTrainerVerifiedOnThisDevice(token){
 let CLIENT = null;
 let LIBRARY = [];
 let orgIdByKey = {}; // 'strong'/'premier' -> real org id, for the create-new-item form
+let myOrgIds = [];    // the currently signed-in trainer's real org affiliations
 let assigned = [];
 
 async function init(){
@@ -341,6 +342,13 @@ async function init(){
     window.location.href = `index.html?id=${TRAINER_TOKEN}`;
     return;
   }
+
+  try {
+    const meRows = await sbReq(`checkin_trainers?select=id&token=eq.${TRAINER_TOKEN}`);
+    const myTrainerId = meRows && meRows[0] ? meRows[0].id : null;
+    const myOrgRows = myTrainerId ? await sbReq(`checkin_trainer_orgs?select=org_id&trainer_id=eq.${myTrainerId}`) : [];
+    myOrgIds = (myOrgRows||[]).map(r => r.org_id);
+  } catch(e){ myOrgIds = []; }
 
   if(!CLIENT_ID){
     document.getElementById('client-name').textContent = 'No client specified';
@@ -469,9 +477,22 @@ function openPicker(){
   document.getElementById('new-item-client-name').textContent = CLIENT.name.split(' ')[0];
   document.getElementById('new-item-form').classList.add('hidden');
   document.getElementById('new-item-toggle').textContent = '+ Create a new item';
-  // Default the org choice to whatever this client's own org actually is — sensible
-  // starting point given we're already inside their plan, but still fully editable.
-  const orgKey = CLIENT.org_id === orgIdByKey.premier ? 'premier' : CLIENT.org_id === orgIdByKey.strong ? 'strong' : '';
+
+  // A trainer tied to just one org shouldn't be able to tag a new item for the other
+  // org, or "All orgs" — same restriction as the library tool, applied here too since
+  // this is a second, separate entry point for creating library items.
+  const allOrgOpts = document.querySelectorAll('#new-item-org .mode-opt');
+  allOrgOpts.forEach(o => { o.style.pointerEvents = ''; o.style.opacity = ''; o.classList.remove('hidden'); });
+  let orgKey;
+  if(myOrgIds.length === 1){
+    const myOrgId = myOrgIds[0];
+    orgKey = myOrgId === orgIdByKey.premier ? 'premier' : myOrgId === orgIdByKey.strong ? 'strong' : '';
+    allOrgOpts.forEach(o => o.classList.toggle('hidden', o.dataset.org !== orgKey));
+  } else {
+    // No restriction — default to whatever this client's own org actually is, same as
+    // before, since that's still the sensible starting point when it's fully editable.
+    orgKey = CLIENT.org_id === orgIdByKey.premier ? 'premier' : CLIENT.org_id === orgIdByKey.strong ? 'strong' : '';
+  }
   document.querySelectorAll('#new-item-org .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === orgKey));
   document.getElementById('new-item-category').value = '';
   document.getElementById('new-item-name').value = '';
