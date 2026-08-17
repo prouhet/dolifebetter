@@ -467,10 +467,14 @@ async function init(){
     // specific to this client's actual org — a Studio Strong client should never see
     // Premier U's separate clinical catalog show up here, and vice versa.
     const orgFilter = CLIENT.org_id ? `or=(org_id.is.null,org_id.eq.${CLIENT.org_id})` : 'org_id=is.null';
-    [libRows, assignRows] = await Promise.all([
-      sbReq(`checkin_library_items?select=*&${orgFilter}&order=category`),
-      sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT_ID}&order=effective_from`)
-    ]);
+    // Defensive same as the library page: archived_at is newer, fall back if it's
+    // somehow not there yet rather than take down the whole assign-item picker.
+    try {
+      libRows = await sbReq(`checkin_library_items?select=*&archived_at=is.null&${orgFilter}&order=category`);
+    } catch(e){
+      libRows = await sbReq(`checkin_library_items?select=*&${orgFilter}&order=category`);
+    }
+    assignRows = await sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT_ID}&order=effective_from`);
     try {
       const orgs = await sbReq('checkin_orgs?select=id,name');
       (orgs||[]).forEach(o => {
