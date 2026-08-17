@@ -229,9 +229,11 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div id="paste-stage">
         <div class="field-block">
           <div class="field-label">Describe the task</div>
-          <textarea class="paste-box" id="paste-input">Let's have them track push-ups. Start around 20 a day, could work up toward 50 over time.</textarea>
+          <div style="font-size:12.5px;color:var(--ink-faint);margin-bottom:8px;font-style:italic">Example: "Let's have them track push-ups. Start around 20 a day, could work up toward 50 over time."</div>
+          <textarea class="paste-box" id="paste-input" placeholder="Type, paste, or tap the mic to describe it out loud…"></textarea>
+          <div id="paste-mic-status" class="hidden" style="font-size:13px;color:var(--care);margin-top:6px">Didn't catch that — try again, or just type instead.</div>
           <div class="input-controls">
-            <button class="mic-btn" id="mic-btn" onclick="toggleMic()" title="Voice input">
+            <button class="mic-btn" id="paste-input-mic-btn" onclick="toggleMic('paste-input')" title="Voice input">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
@@ -327,6 +329,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         </div>
 
         <button class="save-btn" onclick="saveItem()"><span id="save-btn-label">Add to Library</span></button>
+        <div id="archive-item-link" class="hidden" style="text-align:center;margin-top:14px;font-size:13px;color:var(--care);cursor:pointer" onclick="archiveLibraryItem()">Archive this item</div>
       </div>
     </div>
 
@@ -411,6 +414,9 @@ function showScreen(id){
 
 // ─── Real config ──────────────────────────────────────────────────────────
 const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
+// Same scoped voice-transcription key used on the client-facing pages — only unlocks
+// /transcribe, safe to embed here the same way.
+const CHECKIN_VOICE_KEY = "53bd219ac2f1d35e229f27e17312f3e0f716b0b6";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
 const SBH = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
 async function sbReq(path, opts = {}) {
@@ -426,10 +432,16 @@ let orgIdByKey = {};   // 'strong'/'premier' -> real org id, for the add/edit fo
 let myOrgIds = [];      // the currently signed-in trainer's real org affiliations
 
 async function loadLibrary(){
-  const [items, orgs] = await Promise.all([
-    sbReq('checkin_library_items?select=*&order=category'),
-    sbReq('checkin_orgs?select=id,name')
-  ]);
+  // Defensive: archived_at is a newer column. If the migration hasn't been run yet,
+  // this filtered query would 400 and take the entire library down with it — falling
+  // back to the unfiltered query keeps everything working in the meantime.
+  let items;
+  try {
+    items = await sbReq('checkin_library_items?select=*&archived_at=is.null&order=category');
+  } catch(e){
+    items = await sbReq('checkin_library_items?select=*&order=category');
+  }
+  const orgs = await sbReq('checkin_orgs?select=id,name');
   orgs.forEach(o => {
     orgLookup[o.id] = o.name;
     if(/premier/i.test(o.name)) orgIdByKey.premier = o.id;
@@ -583,11 +595,14 @@ async function initLibrary(){
 initLibrary();
 
 let editingItemId = null;
+let editingItemName = null;
 
 function openEditItem(id){
   editingItemId = id;
   const item = library.find(x => x.id === id);
   if(!item) return;
+  editingItemName = item.name;
+  document.getElementById('archive-item-link').classList.remove('hidden');
 
   document.getElementById('screen-add-heading').textContent = `Edit ${item.name}`;
   document.getElementById('draft-note-callout').classList.add('hidden');
@@ -705,27 +720,77 @@ function interpretAction(){
   }, 1600);
 }
 
-// Same mic pattern as capture.html: tap to record (red pulse), tap again to stop and
-// transcribe (teal pulse), then it drops the text into the box — same textarea either way.
-let micRecording = false;
-function toggleMic(){
-  const btn = document.getElementById('mic-btn');
-  if(!micRecording){
-    micRecording = true;
-    btn.classList.add('recording');
-    btn.title = 'Tap to stop';
-  } else {
-    micRecording = false;
-    btn.classList.remove('recording');
-    btn.classList.add('processing');
-    btn.title = 'Transcribing…';
-    setTimeout(() => {
-      document.getElementById('paste-input').value =
-        "Let's have them track push-ups. Start around 20 a day, could work up toward 50 over time.";
-      btn.classList.remove('processing');
-      btn.title = 'Voice input';
-    }, 1400);
+function getBestMimeType(){
+  const types = ['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm','audio/ogg','audio/mp4'];
+  for(const t of types){ try{ if(MediaRecorder.isTypeSupported(t)) return t; }catch(e){} }
+  return '';
+}
+
+let mediaRecorder = null, audioChunks = [], isRecording = false;
+async function toggleMic(targetId){
+  const micBtn = document.getElementById(targetId + '-mic-btn');
+  const statusEl = document.getElementById(targetId + '-mic-status');
+
+  if(isRecording){ mediaRecorder?.stop(); return; }
+  if(statusEl) statusEl.classList.add('hidden');
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch(e){
+    alert('Microphone access denied — you can still type instead.');
+    return;
   }
+
+  audioChunks = [];
+  const mimeType = getBestMimeType();
+  try {
+    mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  } catch(e){
+    try { mediaRecorder = new MediaRecorder(stream); }
+    catch(e2){ alert('Recording not supported on this device.'); stream.getTracks().forEach(t=>t.stop()); return; }
+  }
+  const actualMime = mediaRecorder.mimeType || mimeType || 'audio/webm';
+  mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) audioChunks.push(e.data); };
+
+  mediaRecorder.onstop = async () => {
+    isRecording = false;
+    micBtn.classList.remove('recording');
+    stream.getTracks().forEach(t => t.stop());
+
+    const blob = new Blob(audioChunks, { type: actualMime });
+    if(blob.size < 1000){
+      if(statusEl) statusEl.classList.remove('hidden');
+      return;
+    }
+
+    micBtn.classList.add('processing');
+    try {
+      const res = await fetch(
+        `${SB_URL}/functions/v1/transcribe?key=${encodeURIComponent(CHECKIN_VOICE_KEY)}`,
+        { method:'POST', headers:{ 'Content-Type': actualMime }, body: blob }
+      );
+      if(!res.ok){ throw new Error('Transcribe ' + res.status); }
+      const data = await res.json();
+      const transcript = (data.transcript || '').trim();
+      if(transcript){
+        const ta = document.getElementById(targetId);
+        const existing = ta.value.trim();
+        ta.value = existing ? existing + ' ' + transcript : transcript;
+        ta.dispatchEvent(new Event('input'));
+      } else if(statusEl){
+        statusEl.classList.remove('hidden');
+      }
+    } catch(e){
+      if(statusEl) statusEl.classList.remove('hidden');
+    } finally {
+      micBtn.classList.remove('processing');
+    }
+  };
+
+  mediaRecorder.start(250);
+  isRecording = true;
+  micBtn.classList.add('recording');
 }
 
 document.getElementById('type-toggle').addEventListener('click', e => {
@@ -786,13 +851,31 @@ function applyOrgAccessRestriction(){
   return myKey;
 }
 
+async function archiveLibraryItem(){
+  if(!confirm(`Archive "${editingItemName}"? It'll disappear from the library, but any client already tracking it keeps their real history.`)) return;
+  try {
+    await sbReq(`checkin_library_items?id=eq.${editingItemId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({archived_at: new Date().toISOString()})});
+  } catch(e){
+    showToast('✗ Could not archive — try again');
+    return;
+  }
+  editingItemId = null;
+  await loadLibrary();
+  renderLibrary();
+  showScreen('screen-library');
+  showToast('✓ Archived');
+}
+
 function openAddNewItem(){
   editingItemId = null;
+  document.getElementById('archive-item-link').classList.add('hidden');
   document.getElementById('screen-add-heading').textContent = 'Add a check-in item';
   document.getElementById('save-btn-label').textContent = 'Add to Library';
   document.getElementById('draft-note-callout').classList.add('hidden');
   document.getElementById('paste-stage').classList.remove('hidden');
   document.getElementById('draft-stage').classList.add('hidden');
+  document.getElementById('paste-input').value = '';
+  document.getElementById('paste-mic-status').classList.add('hidden');
   const restrictedOrgKey = applyOrgAccessRestriction();
   document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === (restrictedOrgKey || '')));
   updateSubcategorySuggestions(restrictedOrgKey || '');
