@@ -494,8 +494,18 @@ function setOrgFilter(key){
 function renderLibrary(){
   const list = document.getElementById('item-list');
   let html = '';
-  const filterOrgId = orgFilter ? orgIdByKey[orgFilter] : null;
-  const visible = orgFilter ? library.filter(i => i.orgId === filterOrgId) : library;
+  let visible;
+  if(myOrgIds.length === 1){
+    document.getElementById('org-filter-tabs').classList.add('hidden');
+    // Hard-scoped, not just a filter choice — a single-org trainer never sees the other
+    // org's catalog at all, not even by switching tabs (the tabs are hidden for them).
+    const myOrgId = myOrgIds[0];
+    visible = library.filter(i => !i.orgId || i.orgId === myOrgId);
+  } else {
+    document.getElementById('org-filter-tabs').classList.remove('hidden');
+    const filterOrgId = orgFilter ? orgIdByKey[orgFilter] : null;
+    visible = orgFilter ? library.filter(i => i.orgId === filterOrgId) : library;
+  }
   const cats = [...new Set(visible.map(i => i.category))]; // real categories present, whatever this org's taxonomy is
   cats.forEach(cat => {
     const items = visible.filter(item => item.category === cat);
