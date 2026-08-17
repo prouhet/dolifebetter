@@ -430,6 +430,33 @@ async function submitSignup(){
     }
   }
   showScreen('screen-sent');
+  notifyAdmins(name, phone, selectedTrainerId); // fire-and-forget — the signup already saved either way
+}
+
+async function notifyAdmins(name, phone, preferredTrainerId){
+  try {
+    if(!preferredTrainerId){
+      // No preference stated — this is the "needs a human to route it" case, so it goes
+      // to the shared inbox rather than individual trainers, so it doesn't depend on one
+      // specific person being the one to notice.
+      await fetch(`${SB_URL}/functions/v1/notify-trainer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SB_KEY}`, 'apikey': SB_KEY },
+        body: JSON.stringify({ trainerEmail: 'studiostrongfit@gmail.com', trainerName: 'there', clientName: name, clientPhone: phone, notificationType: 'signup' })
+      });
+      return;
+    }
+    // A preference was stated — same as before, notify the admin trainers for this org.
+    const orgTrainers = await sbReq(`checkin_trainer_orgs?select=checkin_trainers(name,email,is_admin,archived_at)&org_id=eq.${selectedOrgId}`);
+    const admins = (orgTrainers||[])
+      .map(r => r.checkin_trainers)
+      .filter(t => t && t.is_admin && !t.archived_at && t.email);
+    await Promise.all(admins.map(t => fetch(`${SB_URL}/functions/v1/notify-trainer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SB_KEY}`, 'apikey': SB_KEY },
+      body: JSON.stringify({ trainerEmail: t.email, trainerName: t.name, clientName: name, clientPhone: phone, notificationType: 'signup' })
+    })));
+  } catch(e){ /* the signup itself already saved — a failed notification here isn't the client's problem */ }
 }
 </script>
 </body>
