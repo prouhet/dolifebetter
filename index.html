@@ -187,10 +187,13 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
         </label>
       </div>
       <button class="cta" id="submit-btn" onclick="handleSubmit()" disabled>Check In</button>
+      <div class="edit-link" style="text-align:center" onclick="submitRestDay()">Rest day — didn't get to anything today, and that's okay</div>
+      <a class="stats-link" id="poll-stats-link" href="client_stats_page.html">See your stats →</a>
     </div>
 
     <div id="nothing-today-actions" class="hidden">
       <div class="edit-link" style="margin-top:4px;font-size:14px;color:var(--care)" onclick="promptTalkToTrainer()">Need to talk to <span id="trainer-name-inline-nothing">your trainer</span> today?</div>
+      <a class="stats-link" id="nothing-stats-link" href="client_stats_page.html">See your stats →</a>
     </div>
 
     <div class="brand-footer">
@@ -228,7 +231,7 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
     <div class="center-icon-wrap" id="confirm-icon-wrap"><span id="confirm-icon">✓</span></div>
     <div class="center-title" id="confirm-title">Logged. Nice work today.</div>
     <div class="center-sub" id="confirm-sub"></div>
-    <div class="inspire-block">
+    <div class="inspire-block" id="inspire-block">
       <div class="inspire-eyebrow">🌱</div>
       <div class="inspire-text" id="inspire-text"></div>
       <div id="inspire-author" class="hidden" style="font-size:12px;color:var(--ink-faint);margin-top:6px;font-style:normal"></div>
@@ -369,6 +372,7 @@ let ANSWERS = {};
 let currentDailyId = null;
 let periodicChoice = null;
 let needsHelpChecked = false;
+let isRestDay = false;
 
 const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function todayDow(){ return DOW_SHORT[new Date().getDay()]; }
@@ -430,13 +434,20 @@ async function continueAfterVerify(){
 
   let existingDaily = [];
   try {
-    existingDaily = await sbReq(`checkin_daily?select=id,needs_help,needs_help_note,periodic_choice&client_id=eq.${CLIENT.id}&checkin_date=eq.${todayISO()}`);
-  } catch(e){}
+    existingDaily = await sbReq(`checkin_daily?select=id,needs_help,needs_help_note,periodic_choice,is_rest_day&client_id=eq.${CLIENT.id}&checkin_date=eq.${todayISO()}`);
+  } catch(e){
+    // is_rest_day may not exist yet if the migration hasn't run — fall back
+    // to the original select so today's check-in status still loads correctly.
+    try {
+      existingDaily = await sbReq(`checkin_daily?select=id,needs_help,needs_help_note,periodic_choice&client_id=eq.${CLIENT.id}&checkin_date=eq.${todayISO()}`);
+    } catch(e2){}
+  }
 
   if(existingDaily && existingDaily.length){
     currentDailyId = existingDaily[0].id;
     needsHelpChecked = existingDaily[0].needs_help;
     periodicChoice = existingDaily[0].periodic_choice;
+    isRestDay = !!existingDaily[0].is_rest_day;
     let existingResponses = [];
     try {
       existingResponses = await sbReq(`checkin_responses?select=library_item_id,value&checkin_daily_id=eq.${currentDailyId}`);
@@ -448,6 +459,8 @@ async function continueAfterVerify(){
   }
 
   document.getElementById('poll-greeting').textContent = `Hey ${CLIENT.name.split(' ')[0]} 👋`;
+  document.getElementById('poll-stats-link').href = `client_stats_page.html?id=${CLIENT.id}`;
+  document.getElementById('nothing-stats-link').href = `client_stats_page.html?id=${CLIENT.id}`;
   renderPoll();
 
   if(currentDailyId){
@@ -599,6 +612,18 @@ function handleSubmit(){
     doSubmit(null);
   }
 }
+function submitRestDay(){
+  isRestDay = true;
+  ASSIGNMENTS.forEach(a => { ANSWERS[a.id] = 'Rest day'; });
+  if(needsHelpChecked){
+    // They can still flag they'd like their trainer to reach out — the rest-day
+    // flag rides along and gets saved whenever they send that note.
+    showScreen('screen-support');
+    checkSupportValid();
+  } else {
+    doSubmit(null);
+  }
+}
 function promptTalkToTrainer(){
   // Nothing was expected today, so there's no poll to submit — this is the
   // only real action available, and it goes straight to the same support
@@ -620,20 +645,42 @@ function submitSupport(){
   doSubmit(note);
 }
 
+async function upsertDaily(payload){
+  // is_rest_day may not exist yet if the migration hasn't run. Try with it first;
+  // if that specific call fails, retry without it so check-ins never break for
+  // anyone — the only cost is the rest-day flag itself silently not saving.
+  try {
+    if(currentDailyId){
+      await sbReq(`checkin_daily?id=eq.${currentDailyId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
+    } else {
+      const rows = await sbReq('checkin_daily', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify(payload)});
+      currentDailyId = rows[0].id;
+    }
+    return;
+  } catch(e){}
+  const fallback = { ...payload };
+  delete fallback.is_rest_day;
+  if(currentDailyId){
+    await sbReq(`checkin_daily?id=eq.${currentDailyId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify(fallback)});
+  } else {
+    const rows = await sbReq('checkin_daily', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify(fallback)});
+    currentDailyId = rows[0].id;
+  }
+}
+
 async function doSubmit(note){
   const dailyPayload = {
     client_id: CLIENT.id,
     checkin_date: todayISO(),
     needs_help: needsHelpChecked,
-    needs_help_note: note || null
+    needs_help_note: note || null,
+    is_rest_day: isRestDay
   };
   try {
-    if(currentDailyId){
-      await sbReq(`checkin_daily?id=eq.${currentDailyId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify(dailyPayload)});
+    const hadDailyId = !!currentDailyId;
+    await upsertDaily(dailyPayload);
+    if(hadDailyId){
       await sbReq(`checkin_responses?checkin_daily_id=eq.${currentDailyId}`, {method:'DELETE'});
-    } else {
-      const rows = await sbReq('checkin_daily', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify(dailyPayload)});
-      currentDailyId = rows[0].id;
     }
     if(ASSIGNMENTS.length){
       const responseRows = ASSIGNMENTS.map(a => ({
@@ -709,13 +756,21 @@ async function showConfirm(isSupport, note){
     document.getElementById('confirm-icon').textContent = '✓';
     document.getElementById('confirm-title').textContent = 'Logged.';
     document.getElementById('confirm-sub').textContent = "Sent to " + (CLIENT.checkin_trainers?.name || 'your trainer') + " — they'll help you figure out what's next.";
+  } else if(isRestDay){
+    document.getElementById('confirm-icon-wrap').classList.remove('care');
+    document.getElementById('confirm-icon').textContent = '🌙';
+    document.getElementById('confirm-title').textContent = 'Logged. Rest day.';
+    document.getElementById('confirm-sub').textContent = "Didn't do anything today, and that's okay — tomorrow's another day.";
   } else {
     document.getElementById('confirm-icon-wrap').classList.remove('care');
     document.getElementById('confirm-icon').textContent = '✓';
     document.getElementById('confirm-title').textContent = 'Logged. Nice work today.';
     document.getElementById('confirm-sub').textContent = 'No lecture, no scorecard — just showing up counts. See you tomorrow.';
   }
-  await renderInspireBlock();
+  document.getElementById('inspire-block').classList.toggle('hidden', isRestDay);
+  if(!isRestDay){
+    await renderInspireBlock();
+  }
   showScreen('screen-confirm');
 }
 
@@ -743,6 +798,7 @@ async function renderInspireBlock(){
 }
 
 function editCheckin(){
+  isRestDay = false;
   showScreen('screen-poll');
   renderPoll();
 }
