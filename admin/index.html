@@ -179,7 +179,7 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
 .day-box{width:16px;height:16px;border-radius:5px}
 .day-box.green{background:var(--green)}
 .day-box.red{background:var(--amber)}
-.day-box.neutral{background:var(--surface-soft)}
+.day-box.neutral{background:transparent;border:1px solid var(--surface-soft)}
 
 /* Urgent section */
 .urgent-banner{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--red);
@@ -628,10 +628,22 @@ let CURRENT_TOKEN = new URLSearchParams(window.location.search).get('id') || '';
 async function computeClientDayData(client){
   let assignments = [], dailyRows = [];
   try {
-    assignments = await sbReq(`checkin_assignments?select=schedule_type,days&client_id=eq.${client.id}&effective_to=is.null`);
+    assignments = await sbReq(`checkin_assignments?select=schedule_type,days,effective_from&client_id=eq.${client.id}&effective_to=is.null`);
   } catch(e){}
-  const expectedDows = new Set();
-  (assignments||[]).forEach(a => { if(a.schedule_type === 'days'){ (a.days||[]).forEach(d => expectedDows.add(d)); } });
+  const schedules = (assignments||[]).map(a => ({
+    scheduleType: a.schedule_type, days: a.days || [], effectiveFrom: a.effective_from || null
+  }));
+  // A day only counts as "missed" if some assignment both covers that day-of-week
+  // AND was actually active as of that date — otherwise the client hadn't started
+  // tracking yet and the day should read as "not expected", not "missed".
+  function isExpectedOn(dateStr, dow){
+    return schedules.some(s => {
+      if(s.effectiveFrom && dateStr < s.effectiveFrom) return false;
+      if(s.scheduleType === 'weekly') return true;
+      if(s.scheduleType === 'days') return s.days.includes(dow);
+      return false;
+    });
+  }
 
   try {
     dailyRows = await sbReq(`checkin_daily?select=checkin_date,needs_help,needs_help_note&client_id=eq.${client.id}&order=checkin_date.desc&limit=14`);
@@ -651,7 +663,7 @@ async function computeClientDayData(client){
       days.push('green');
       if(rec.needs_help){ helpDays.push(true); notes[idx] = rec.needs_help_note || ''; }
       else helpDays.push(false);
-    } else if(expectedDows.has(dow)){
+    } else if(isExpectedOn(dateStr, dow)){
       days.push('red'); helpDays.push(false);
     } else {
       days.push('neutral'); helpDays.push(false);
