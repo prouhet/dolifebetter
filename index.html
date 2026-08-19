@@ -394,6 +394,13 @@ function isVerifiedOnThisDevice(){
 function markVerifiedOnThisDevice(){
   try { localStorage.setItem(`verified_${CLIENT_TOKEN}`, 'true'); } catch(e){}
 }
+function hasSeenWelcome(){
+  try { return localStorage.getItem(`welcome_seen_${CLIENT_TOKEN}`) === 'true'; }
+  catch(e){ return true; } // localStorage disabled — default to skipping it rather than showing every time
+}
+function markWelcomeSeen(){
+  try { localStorage.setItem(`welcome_seen_${CLIENT_TOKEN}`, 'true'); } catch(e){}
+}
 function last4(phone){
   return (phone || '').replace(/\D/g, '').slice(-4);
 }
@@ -459,14 +466,16 @@ async function continueAfterVerify(){
   }
 
   document.getElementById('poll-greeting').textContent = `Hey ${CLIENT.name.split(' ')[0]} 👋`;
-  document.getElementById('poll-stats-link').href = `client_stats_page.html?id=${CLIENT.id}`;
-  document.getElementById('nothing-stats-link').href = `client_stats_page.html?id=${CLIENT.id}`;
+  document.getElementById('poll-stats-link').href = `client_stats_page.html?id=${CLIENT.token}`;
+  document.getElementById('nothing-stats-link').href = `client_stats_page.html?id=${CLIENT.token}`;
   renderPoll();
 
   if(currentDailyId){
     await showConfirm(needsHelpChecked, existingDaily[0].needs_help_note);
-  } else {
+  } else if(!hasSeenWelcome()){
     showScreen('screen-welcome');
+  } else {
+    showScreen('screen-poll');
   }
 }
 
@@ -491,7 +500,7 @@ async function init(){
   await continueAfterVerify();
 }
 
-function dismissWelcome(){ showScreen('screen-poll'); }
+function dismissWelcome(){ markWelcomeSeen(); showScreen('screen-poll'); }
 
 // ─── Dynamic poll rendering ──────────────────────────────────────────────
 function renderPoll(){
