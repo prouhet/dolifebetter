@@ -57,6 +57,7 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
 .badge.organic{background:var(--teal-tint);color:var(--teal-deep)}
 
 .section-label{font-size:12.5px;font-weight:600;color:var(--ink-dim);text-transform:uppercase;letter-spacing:.04em;margin:26px 0 12px}
+.plan-tab.active{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(20,32,42,0.05)}
 .section-label:first-of-type{margin-top:0}
 
 /* Assigned items */
@@ -194,10 +195,22 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       </div>
       </div>
 
-      <div class="section-label">Assigned dids</div>
-      <div id="assigned-list"></div>
+      <div class="tabs" style="display:flex;gap:6px;background:var(--surface-soft);border-radius:10px;padding:3px;margin-bottom:18px">
+        <div class="plan-tab active" id="tab-update-btn" onclick="switchPlanTab('update')" style="flex:1;text-align:center;padding:9px;border-radius:8px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--ink-dim)">Update</div>
+        <div class="plan-tab" id="tab-stats-btn" onclick="switchPlanTab('stats')" style="flex:1;text-align:center;padding:9px;border-radius:8px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--ink-dim)">Stats</div>
+      </div>
 
-      <button class="add-btn" onclick="openPicker()">＋ Assign an item</button>
+      <div id="tab-update">
+        <div class="section-label" style="margin-top:0">Assigned dids</div>
+        <div id="assigned-list"></div>
+
+        <button class="add-btn" onclick="openPicker()">＋ Assign an item</button>
+      </div>
+
+      <div id="tab-stats" class="hidden">
+        <div id="stats-list"></div>
+        <div id="stats-empty" class="hidden" style="font-size:13.5px;color:var(--ink-faint);text-align:center;padding:20px 0">No check-ins logged yet.</div>
+      </div>
     </div>
 
     <!-- SCREEN: PICK ITEM -->
@@ -427,6 +440,7 @@ let LIBRARY = [];
 let orgIdByKey = {}; // 'strong'/'premier' -> real org id, for the create-new-item form
 let myOrgIds = [];    // the currently signed-in trainer's real org affiliations
 let assigned = [];
+let RESPONSES = []; // this client's real logged answers, one row per item per day
 
 async function init(){
   // Same device-verification the main admin tool requires — this page never had its
@@ -476,6 +490,9 @@ async function init(){
     }
     assignRows = await sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT_ID}&order=effective_from`);
     try {
+      RESPONSES = await sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT_ID}&order=checkin_daily(checkin_date).desc`);
+    } catch(e){ RESPONSES = []; } // stats tab just shows empty rather than blocking the whole page
+    try {
       const orgs = await sbReq('checkin_orgs?select=id,name');
       (orgs||[]).forEach(o => {
         if(/premier/i.test(o.name)) orgIdByKey.premier = o.id;
@@ -513,6 +530,7 @@ async function init(){
   document.getElementById('client-meta').innerHTML = `<span class="badge premier">${CLIENT.checkin_orgs?.name||'—'}</span><span>· Trainer: ${CLIENT.checkin_trainers?.name||'—'}</span>`;
 
   renderAssigned();
+  renderStatsTab();
 }
 
 function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : type === 'choice' ? '☰' : '#'; }
@@ -567,6 +585,65 @@ function renderAssigned(){
 }
 function toggleHistory(i){
   document.getElementById('history-' + i).classList.toggle('hidden');
+}
+
+function switchPlanTab(which){
+  document.getElementById('tab-update').classList.toggle('hidden', which !== 'update');
+  document.getElementById('tab-stats').classList.toggle('hidden', which !== 'stats');
+  document.getElementById('tab-update-btn').classList.toggle('active', which === 'update');
+  document.getElementById('tab-stats-btn').classList.toggle('active', which === 'stats');
+}
+
+function renderStatsTab(){
+  const list = document.getElementById('stats-list');
+  const empty = document.getElementById('stats-empty');
+  if(!assigned.length){
+    list.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  list.innerHTML = assigned.map((a, i) => {
+    const rows = RESPONSES.filter(r => r.library_item_id === a.libId);
+    // RESPONSES already comes sorted newest-first from the query, so rows[0] is most recent.
+    if(!rows.length){
+      return `
+        <div class="assigned-card">
+          <div class="assigned-name-row"><div class="assigned-name-block"><div class="type-badge ${a.type}">${typeIcon(a.type)}</div><div class="assigned-name">${a.name}</div></div></div>
+          <div style="font-size:13px;color:var(--ink-faint);margin-top:6px">No check-ins logged yet.</div>
+        </div>`;
+    }
+    const visible = rows.slice(0, 5);
+    const rest = rows.slice(5);
+    const rowHtml = r => a.type === 'reflection'
+      ? `<div class="history-row" style="flex-direction:column;align-items:flex-start;gap:3px"><span style="color:var(--ink-faint);font-size:12px">${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val" style="font-weight:400;color:var(--ink)">${escapeHtml(r.value)}</span></div>`
+      : `<div class="history-row"><span>${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val">${escapeHtml(r.value)}</span></div>`;
+    return `
+      <div class="assigned-card">
+        <div class="assigned-name-row"><div class="assigned-name-block"><div class="type-badge ${a.type}">${typeIcon(a.type)}</div><div class="assigned-name">${a.name}</div></div></div>
+        <div class="history-panel" style="margin-top:8px">
+          ${visible.map(rowHtml).join('')}
+        </div>
+        ${rest.length ? `
+          <div class="history-toggle" onclick="toggleStatsExpand(${i})">Show ${rest.length} more</div>
+          <div class="history-panel hidden" id="stats-expand-${i}">${rest.map(rowHtml).join('')}</div>
+        ` : ''}
+      </div>`;
+  }).join('');
+}
+
+function toggleStatsExpand(i){
+  const panel = document.getElementById('stats-expand-' + i);
+  const wasHidden = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden');
+  const toggle = panel.previousElementSibling;
+  if(toggle && toggle.classList.contains('history-toggle')){
+    toggle.textContent = wasHidden ? 'Show less' : `Show ${panel.children.length} more`;
+  }
+}
+
+function escapeHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 let pendingItem = null;
