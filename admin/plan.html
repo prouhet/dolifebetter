@@ -200,15 +200,19 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       </div>
 
       <div id="tab-update">
-        <div class="section-label" style="margin-top:0">Assigned actions</div>
-        <div id="assigned-actions-list"></div>
-        <div id="assigned-actions-empty" class="hidden" style="font-size:13px;color:var(--ink-faint);padding:4px 0 12px">No actions assigned yet — dids can still be assigned directly below.</div>
-        <button class="add-btn" onclick="openActionPicker()" style="margin-bottom:22px">＋ Assign an action</button>
+        <div id="actions-section">
+          <div class="section-label" style="margin-top:0">Assigned actions</div>
+          <div id="assigned-actions-list"></div>
+          <div id="assigned-actions-empty" class="hidden" style="font-size:13px;color:var(--ink-faint);padding:4px 0 12px">No actions assigned yet.</div>
+          <button class="add-btn" onclick="openActionPicker()" style="margin-bottom:22px">＋ Assign an action</button>
+        </div>
 
-        <div class="section-label">Assigned dids</div>
-        <div id="assigned-list"></div>
+        <div id="dids-section">
+          <div class="section-label" style="margin-top:0">Assigned dids</div>
+          <div id="assigned-list"></div>
 
-        <button class="add-btn" onclick="openPicker()">＋ Assign an item</button>
+          <button class="add-btn" onclick="openPicker()">＋ Assign an item</button>
+        </div>
       </div>
 
       <div id="tab-stats" class="hidden">
@@ -268,9 +272,14 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
     <div id="screen-config" class="hidden draft-wrap">
       <div class="back-link" id="config-back-link" onclick="goBackFromConfig()">← Back to library</div>
       <div class="section-label" style="margin-top:0" id="config-heading">Set Jane's goal</div>
+      <div id="config-action-badge" class="hidden" style="display:inline-block;font-size:12px;font-weight:600;color:var(--teal-deep);background:var(--surface-soft);padding:4px 10px;border-radius:100px;margin-bottom:12px"></div>
       <div id="edit-in-library-row" class="hidden" style="margin:-8px 0 18px">
         <span style="font-size:13px;color:var(--ink-faint)">This only sets the schedule and goal. </span>
         <span style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer;text-decoration:underline" onclick="editThisItemInLibrary()">Edit the item itself →</span>
+      </div>
+      <div id="config-guidance-block" class="hidden" style="background:var(--surface-soft);border-radius:14px;padding:14px 16px;margin-bottom:18px;font-size:13.5px;line-height:1.5">
+        <div id="config-guidance-text" style="color:var(--ink)"></div>
+        <div id="config-recommendation-text" style="color:var(--ink-dim);margin-top:6px"></div>
       </div>
 
       <div class="config-block">
@@ -326,6 +335,16 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
             <div class="stepper-btn" onclick="stepWeekly(-1)">−</div>
             <div class="stepper-val" id="weekly-val">3</div>
             <div class="stepper-btn" onclick="stepWeekly(1)">+</div>
+          </div>
+        </div>
+
+        <div class="config-row">
+          <div class="config-label">Consistency goal <span style="font-weight:400;color:var(--ink-faint)">— optional, when to consider this a habit worth building on</span></div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <input type="number" id="consistency-days-input" placeholder="12" style="width:64px;text-align:center">
+            <span style="font-size:13px;color:var(--ink-dim)">of the last</span>
+            <input type="number" id="consistency-window-input" placeholder="14" style="width:64px;text-align:center">
+            <span style="font-size:13px;color:var(--ink-dim)">days</span>
           </div>
         </div>
       </div>
@@ -525,7 +544,7 @@ async function init(){
     document.getElementById('client-name').textContent = 'Could not load — check connection';
     return;
   }
-  LIBRARY = (libRows||[]).map(r => ({id:r.id, name:r.name, type:r.type, unit:r.unit, minValue:r.min_value, maxValue:r.max_value, category:r.category, choices:r.choices}));
+  LIBRARY = (libRows||[]).map(r => ({id:r.id, name:r.name, type:r.type, unit:r.unit, minValue:r.min_value, maxValue:r.max_value, category:r.category, choices:r.choices, guidance:r.guidance, recommendation:r.recommendation}));
 
   // Group all assignment rows (past + current) by library item to reconstruct full goal history —
   // history lives across multiple rows, distinguished by effective_from/effective_to, never
@@ -541,6 +560,7 @@ async function init(){
     const item = current.checkin_library_items;
     return {
       assignmentId: current.id, libId: item.id, name: item.name, type: item.type, unit: item.unit, actionId: current.action_id || null,
+      consistencyTargetDays: current.consistency_target_days ?? null, consistencyTargetWindow: current.consistency_target_window ?? null,
       goal: current.goal, goalLabel: current.goal_label, inputStyle: current.input_style,
       scheduleType: current.schedule_type, days: current.days||[], weeklyCount: current.weekly_count,
       history: rows.map(r => ({goal: r.goal, from: fmtDate(r.effective_from), to: r.effective_to ? fmtDate(r.effective_to) : 'now'}))
@@ -617,6 +637,7 @@ function renderAssignedActions(){
             <span class="val">${p.live ? '✓ live' : '+ add'}</span>
           </div>
         `).join('')}
+        <div style="text-align:center;font-size:12.5px;color:var(--care);cursor:pointer;padding-top:10px" onclick="event.stopPropagation(); removeAction('${ca.clientActionId}')">Remove this action</div>
       </div>
     </div>`;
   }).join('');
@@ -745,6 +766,22 @@ async function assignAction(actionId){
   showToast('✓ Action assigned');
 }
 
+async function removeAction(clientActionId){
+  const ca = clientActions.find(c => c.clientActionId === clientActionId);
+  const liveCount = ca ? ca.pool.filter(p => p.live).length : 0;
+  const today = localISO(new Date());
+  try {
+    await sbReq(`checkin_client_actions?id=eq.${clientActionId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({effective_to: today})});
+  } catch(e){
+    showToast('✗ Could not remove — try again');
+    return;
+  }
+  await init();
+  // Removing the action just closes out its grouping — any dids already live
+  // from its pool keep running exactly as they were, on purpose.
+  showToast(liveCount > 0 ? `✓ Action removed — ${liveCount} active did${liveCount===1?'':'s'} still running` : '✓ Action removed');
+}
+
 function openPicker(){
   document.getElementById('pick-back-name').textContent = CLIENT.name.split(' ')[0] + "'s";
   document.getElementById('new-item-client-name').textContent = CLIENT.name.split(' ')[0];
@@ -855,7 +892,7 @@ async function createNewLibraryItem(){
     return;
   }
   const item = created[0];
-  LIBRARY.push({id:item.id, name:item.name, type:item.type, unit:item.unit, minValue:item.min_value, maxValue:item.max_value, category:item.category, choices:item.choices});
+  LIBRARY.push({id:item.id, name:item.name, type:item.type, unit:item.unit, minValue:item.min_value, maxValue:item.max_value, category:item.category, choices:item.choices, guidance:item.guidance, recommendation:item.recommendation});
 
   // The whole reason to build this here rather than in the separate library tool is to
   // save the trip back — so go straight into assigning it to this client, not back to
@@ -882,6 +919,19 @@ function editThisItemInLibrary(){
   window.location.href = `library.html?id=${TRAINER_TOKEN}&edit=${pendingItem.id}`;
 }
 
+function populateConfigContext(item, actionId){
+  const action = actionId ? actions.find(a => a.id === actionId) : null;
+  const badge = document.getElementById('config-action-badge');
+  badge.classList.toggle('hidden', !action);
+  if(action) badge.textContent = `Part of: ${action.name}`;
+
+  const guidanceBlock = document.getElementById('config-guidance-block');
+  const hasGuidance = item && (item.guidance || item.recommendation);
+  guidanceBlock.classList.toggle('hidden', !hasGuidance);
+  document.getElementById('config-guidance-text').textContent = item?.guidance || '';
+  document.getElementById('config-recommendation-text').textContent = item?.recommendation || '';
+}
+
 function pickItem(id, actionId){
   editingAssignmentId = null;
   pendingActionId = actionId || null;
@@ -903,6 +953,9 @@ function pickItem(id, actionId){
   document.getElementById('goal-unit').textContent = pendingItem.unit || '';
   document.getElementById('goal-input').value = '';
   document.getElementById('target-input').value = '';
+  document.getElementById('consistency-days-input').value = '';
+  document.getElementById('consistency-window-input').value = '';
+  populateConfigContext(pendingItem, pendingActionId);
   document.querySelectorAll('#input-style-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.style === lastInputStyle));
   document.querySelectorAll('#mode-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.mode === 'days'));
   document.querySelectorAll('.day-pick').forEach(d => d.classList.toggle('on', ['Mon','Tue','Wed','Thu','Fri'].includes(d.dataset.d)));
@@ -937,6 +990,9 @@ function openEditAssignment(assignmentId){
   document.getElementById('goal-unit').textContent = a.unit || '';
   document.getElementById('goal-input').value = a.goal != null ? a.goal : '';
   document.getElementById('target-input').value = a.goalLabel || '';
+  document.getElementById('consistency-days-input').value = a.consistencyTargetDays ?? '';
+  document.getElementById('consistency-window-input').value = a.consistencyTargetWindow ?? '';
+  populateConfigContext(pendingItem, pendingActionId);
   document.querySelectorAll('#input-style-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.style === (a.inputStyle||lastInputStyle)));
 
   const isWeekly = a.scheduleType === 'weekly';
@@ -1015,12 +1071,17 @@ async function assignItem(){
   const goalLabel = pendingItem.type === 'yesno' ? (document.getElementById('target-input').value.trim() || null) : null;
   const inputStyle = pendingItem.type === 'numeric' ? document.querySelector('#input-style-toggle .mode-opt.selected').dataset.style : null;
   if(inputStyle) lastInputStyle = inputStyle;
+  const consistencyDaysRaw = document.getElementById('consistency-days-input').value.trim();
+  const consistencyWindowRaw = document.getElementById('consistency-window-input').value.trim();
+  const consistencyTargetDays = consistencyDaysRaw ? parseInt(consistencyDaysRaw, 10) : null;
+  const consistencyTargetWindow = consistencyWindowRaw ? parseInt(consistencyWindowRaw, 10) : null;
 
   const payload = {
     client_id: CLIENT.id, library_item_id: pendingItem.id, action_id: pendingActionId,
     goal, goal_label: goalLabel, input_style: inputStyle,
     schedule_type: scheduleType, days: scheduleType==='days' ? days : null,
-    weekly_count: scheduleType==='weekly' ? weeklyCount : null
+    weekly_count: scheduleType==='weekly' ? weeklyCount : null,
+    consistency_target_days: consistencyTargetDays, consistency_target_window: consistencyTargetWindow
   };
 
   try {
