@@ -193,7 +193,6 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <div style="text-align:center;margin-top:8px;font-size:13px;color:var(--ink-dim);cursor:pointer" onclick="closeChangeTrainerModal()">Cancel</div>
         </div>
       </div>
-      </div>
 
       <div class="tabs" style="display:flex;gap:6px;background:var(--surface-soft);border-radius:10px;padding:3px;margin-bottom:18px">
         <div class="plan-tab active" id="tab-update-btn" onclick="switchPlanTab('update')" style="flex:1;text-align:center;padding:9px;border-radius:8px;font-size:13.5px;font-weight:600;cursor:pointer;color:var(--ink-dim)">Update</div>
@@ -201,7 +200,12 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       </div>
 
       <div id="tab-update">
-        <div class="section-label" style="margin-top:0">Assigned dids</div>
+        <div class="section-label" style="margin-top:0">Assigned actions</div>
+        <div id="assigned-actions-list"></div>
+        <div id="assigned-actions-empty" class="hidden" style="font-size:13px;color:var(--ink-faint);padding:4px 0 12px">No actions assigned yet — dids can still be assigned directly below.</div>
+        <button class="add-btn" onclick="openActionPicker()" style="margin-bottom:22px">＋ Assign an action</button>
+
+        <div class="section-label">Assigned dids</div>
         <div id="assigned-list"></div>
 
         <button class="add-btn" onclick="openPicker()">＋ Assign an item</button>
@@ -210,6 +214,16 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div id="tab-stats" class="hidden">
         <div id="stats-list"></div>
         <div id="stats-empty" class="hidden" style="font-size:13.5px;color:var(--ink-faint);text-align:center;padding:20px 0">No check-ins logged yet.</div>
+      </div>
+    </div>
+
+    <!-- SCREEN: PICK ACTION -->
+    <div id="screen-action-pick" class="hidden">
+      <div class="back-link" onclick="showScreen('screen-plan')">← Back to <span id="action-pick-back-name">their</span> plan</div>
+      <div class="section-label" style="margin-top:0">Pick an action</div>
+      <div class="picker-list" id="action-picker-list"></div>
+      <div id="action-picker-empty" class="hidden" style="font-size:13.5px;color:var(--ink-faint);padding:8px 0">
+        No more actions available for this org — or all of them are already assigned.
       </div>
     </div>
 
@@ -331,7 +345,7 @@ function toggleTheme(){applyTheme(!document.body.classList.contains('dark'));}
 applyTheme(false);
 
 function showScreen(id){
-  ['screen-plan','screen-pick','screen-config'].forEach(s => {
+  ['screen-plan','screen-action-pick','screen-pick','screen-config'].forEach(s => {
     document.getElementById(s).classList.toggle('hidden', s!==id);
   });
 }
@@ -440,6 +454,9 @@ let LIBRARY = [];
 let orgIdByKey = {}; // 'strong'/'premier' -> real org id, for the create-new-item form
 let myOrgIds = [];    // the currently signed-in trainer's real org affiliations
 let assigned = [];
+let actions = [];        // this org's available actions, each with its item pool
+let clientActions = [];  // actions currently assigned to this client
+let pendingActionId = null; // set when picking an item from an action's pool, so the resulting assignment gets tagged
 let RESPONSES = []; // this client's real logged answers, one row per item per day
 
 async function init(){
@@ -463,7 +480,7 @@ async function init(){
     document.getElementById('client-name').textContent = 'No client specified';
     return;
   }
-  let clientRows, libRows, assignRows;
+  let clientRows, libRows, assignRows, actionRows = [], clientActionRows = [], actionItemRows = [];
   try {
     clientRows = await sbReq(`checkin_clients?select=*,checkin_trainers(name,max_dids_per_day),checkin_orgs(name)&id=eq.${CLIENT_ID}`);
   } catch(e){
@@ -489,6 +506,11 @@ async function init(){
       libRows = await sbReq(`checkin_library_items?select=*&${orgFilter}&order=category`);
     }
     assignRows = await sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT_ID}&order=effective_from`);
+    try {
+      actionRows = await sbReq(`checkin_actions?select=*&org_id=eq.${CLIENT.org_id}&archived_at=is.null&order=name`);
+      clientActionRows = await sbReq(`checkin_client_actions?select=*,checkin_actions(*)&client_id=eq.${CLIENT_ID}&effective_to=is.null`);
+      actionItemRows = await sbReq(`checkin_action_items?select=action_id,library_item_id,checkin_library_items(*)&order=display_order`);
+    } catch(e){ actionRows = []; clientActionRows = []; actionItemRows = []; } // actions system just won't show — rest of the page still works
     try {
       RESPONSES = await sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT_ID}&order=checkin_daily(checkin_date).desc`);
     } catch(e){ RESPONSES = []; } // stats tab just shows empty rather than blocking the whole page
@@ -518,17 +540,33 @@ async function init(){
     const current = rows.find(r => !r.effective_to) || rows[rows.length-1];
     const item = current.checkin_library_items;
     return {
-      assignmentId: current.id, libId: item.id, name: item.name, type: item.type, unit: item.unit,
+      assignmentId: current.id, libId: item.id, name: item.name, type: item.type, unit: item.unit, actionId: current.action_id || null,
       goal: current.goal, goalLabel: current.goal_label, inputStyle: current.input_style,
       scheduleType: current.schedule_type, days: current.days||[], weeklyCount: current.weekly_count,
       history: rows.map(r => ({goal: r.goal, from: fmtDate(r.effective_from), to: r.effective_to ? fmtDate(r.effective_to) : 'now'}))
     };
   });
 
+  actions = actionRows || [];
+
+  // For each currently-assigned action, attach its full item pool, marking which
+  // pool items are already live (found in `assigned`) vs. still available to add.
+  clientActions = (clientActionRows || []).map(ca => {
+    const pool = (actionItemRows || [])
+      .filter(ai => ai.action_id === ca.action_id)
+      .map(ai => {
+        const item = ai.checkin_library_items;
+        const live = assigned.find(a => a.libId === item.id);
+        return { libId: item.id, name: item.name, type: item.type, live: !!live, assignmentId: live ? live.assignmentId : null };
+      });
+    return { clientActionId: ca.id, actionId: ca.action_id, name: ca.checkin_actions.name, description: ca.checkin_actions.description, pool };
+  });
+
   document.getElementById('client-avatar').textContent = CLIENT.name[0];
   document.getElementById('client-name').textContent = CLIENT.name;
   document.getElementById('client-meta').innerHTML = `<span class="badge premier">${CLIENT.checkin_orgs?.name||'—'}</span><span>· Trainer: ${CLIENT.checkin_trainers?.name||'—'}</span>`;
 
+  renderAssignedActions();
   renderAssigned();
   renderStatsTab();
 }
@@ -552,6 +590,39 @@ function scheduleHtml(a){
       ).join('')}
     </div>
     <div class="freq-label">${a.days.length}x/week</div>`;
+}
+
+function renderAssignedActions(){
+  const list = document.getElementById('assigned-actions-list');
+  const empty = document.getElementById('assigned-actions-empty');
+  empty.classList.toggle('hidden', clientActions.length > 0);
+  list.innerHTML = clientActions.map((ca, i) => {
+    const liveCount = ca.pool.filter(p => p.live).length;
+    return `
+    <div class="assigned-card">
+      <div class="assigned-name-row" style="cursor:pointer" onclick="toggleActionPool(${i})">
+        <div class="assigned-name-block">
+          <div class="assigned-name">${ca.name}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="assigned-goal">${liveCount} of ${ca.pool.length} active</div>
+          <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" style="flex-shrink:0"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+      </div>
+      ${ca.description ? `<div class="freq-label" style="margin-top:2px">${ca.description}</div>` : ''}
+      <div class="history-panel hidden" id="action-pool-${i}">
+        ${ca.pool.map(p => `
+          <div class="history-row ${p.live ? 'current' : ''}" style="cursor:pointer" onclick="event.stopPropagation(); ${p.live ? `openEditAssignment('${p.assignmentId}')` : `pickItem('${p.libId}', '${ca.actionId}')`}">
+            <span>${typeIcon(p.type)} ${p.name}</span>
+            <span class="val">${p.live ? '✓ live' : '+ add'}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+function toggleActionPool(i){
+  document.getElementById('action-pool-' + i).classList.toggle('hidden');
 }
 
 function renderAssigned(){
@@ -647,6 +718,32 @@ function escapeHtml(s){
 }
 
 let pendingItem = null;
+
+function openActionPicker(){
+  document.getElementById('action-pick-back-name').textContent = CLIENT.name.split(' ')[0] + "'s";
+  const assignedIds = new Set(clientActions.map(ca => ca.actionId));
+  const available = actions.filter(a => !assignedIds.has(a.id));
+  const list = document.getElementById('action-picker-list');
+  document.getElementById('action-picker-empty').classList.toggle('hidden', available.length > 0);
+  list.innerHTML = available.map(a => `
+    <div class="picker-item" onclick="assignAction('${a.id}')">
+      <div class="picker-name">${a.name}${a.description ? `<div style="font-size:12px;font-weight:400;color:var(--ink-faint);margin-top:2px">${a.description}</div>` : ''}</div>
+    </div>
+  `).join('');
+  showScreen('screen-action-pick');
+}
+
+async function assignAction(actionId){
+  try {
+    await sbReq('checkin_client_actions', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({client_id: CLIENT.id, action_id: actionId})});
+  } catch(e){
+    showToast('✗ Could not assign — try again');
+    return;
+  }
+  await init();
+  showScreen('screen-plan');
+  showToast('✓ Action assigned');
+}
 
 function openPicker(){
   document.getElementById('pick-back-name').textContent = CLIENT.name.split(' ')[0] + "'s";
@@ -785,8 +882,9 @@ function editThisItemInLibrary(){
   window.location.href = `library.html?id=${TRAINER_TOKEN}&edit=${pendingItem.id}`;
 }
 
-function pickItem(id){
+function pickItem(id, actionId){
   editingAssignmentId = null;
+  pendingActionId = actionId || null;
   pendingItem = LIBRARY.find(l => l.id === id);
   const first = CLIENT.name.split(' ')[0];
   document.getElementById('config-heading').textContent = `Set ${first}'s plan`;
@@ -820,6 +918,7 @@ function openEditAssignment(assignmentId){
   const a = assigned.find(x => x.assignmentId === assignmentId);
   if(!a) return;
   editingAssignmentId = assignmentId;
+  pendingActionId = a.actionId; // preserve whatever this assignment was already linked to (or null)
   pendingItem = LIBRARY.find(l => l.id === a.libId);
   const first = CLIENT.name.split(' ')[0];
   document.getElementById('config-heading').textContent = `Edit ${first}'s ${a.name}`;
@@ -918,7 +1017,7 @@ async function assignItem(){
   if(inputStyle) lastInputStyle = inputStyle;
 
   const payload = {
-    client_id: CLIENT.id, library_item_id: pendingItem.id,
+    client_id: CLIENT.id, library_item_id: pendingItem.id, action_id: pendingActionId,
     goal, goal_label: goalLabel, input_style: inputStyle,
     schedule_type: scheduleType, days: scheduleType==='days' ? days : null,
     weekly_count: scheduleType==='weekly' ? weeklyCount : null
@@ -941,6 +1040,7 @@ async function assignItem(){
   }
   const wasEditing = !!editingAssignmentId;
   editingAssignmentId = null;
+  pendingActionId = null;
   await init();
   showScreen('screen-plan');
   showToast(wasEditing ? '✓ Changes saved' : `✓ Assigned to ${CLIENT.name.split(' ')[0]}`);
