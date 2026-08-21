@@ -429,7 +429,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div class="page-title" style="font-size:19px" id="client-link-name"></div>
       <div class="page-sub">Text them this link — it's just for them.</div>
       <div style="background:var(--surface);border:1.5px solid var(--surface-soft);border-radius:14px;padding:14px 16px;margin-bottom:14px;word-break:break-all;font-size:14px;color:var(--ink-dim);font-family:monospace" id="client-link-text"></div>
-      <button class="save-btn" id="client-link-copy-btn" onclick="copyClientLink()">Copy Link</button>
+      <button class="save-btn" id="client-link-copy-btn" onclick="copyNewClientLink()">Copy Link</button>
       <div style="text-align:center;margin-top:16px;font-size:13.5px;color:var(--ink-dim);cursor:pointer" onclick="dismissClientLink()">Done</div>
     </div>
 
@@ -458,7 +458,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div class="trainer-select" id="new-client-org"></div>
       </div>
       <div class="field-block">
-        <div class="field-label">Starting dids <span style="font-weight:400;color:var(--ink-faint)">— optional, add more anytime</span></div>
+        <div class="field-label" id="new-client-dids-label">Starting dids <span style="font-weight:400;color:var(--ink-faint)">— optional, add more anytime</span></div>
         <div id="new-client-dids"></div>
         <div class="new-did-toggle" onclick="toggleNewDidForm()" id="new-did-toggle">+ Create a new did</div>
         <div id="new-did-form" class="hidden" style="margin-top:12px;padding:16px;border-radius:14px;background:var(--surface);border:1px solid var(--surface-soft)">
@@ -729,6 +729,7 @@ function trainerOf(id){ return trainers.find(t => t.id === id); }
 function renderTrainers(){
   document.getElementById('trainer-list').innerHTML = trainers.filter(t => !t.archived).map(t => {
     const count = clients.filter(c => c.trainerId === t.id && !c.archived).length;
+    const shortLink = BASE_URL.replace('https://','') + '?id=' + t.token;
     return `
       <div class="trainer-card">
         <div style="display:flex;align-items:center;gap:13px;flex:1;min-width:0;cursor:pointer" onclick="openRoster('${t.id}', true)">
@@ -736,6 +737,11 @@ function renderTrainers(){
           <div class="trainer-body">
             <div class="trainer-name">${t.name}${t.orgIds.map(oid => ` <span class="badge ${orgColorClass(oid)}" style="margin-left:4px">${orgs.find(o=>o.id===oid)?.name||''}</span>`).join('')}</div>
             <div class="trainer-email">${t.email}</div>
+            <div class="client-link" onclick="event.stopPropagation(); copyTrainerLink('${t.name}', '${t.token}')" title="Copy this trainer's login link">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style="flex-shrink:0"><path d="M9 15l6-6M10 6l1-1a4 4 0 015.5 5.5l-1 1M14 18l-1 1A4 4 0 017.5 13.5l1-1" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+              <span class="client-link-text">${shortLink}</span>
+            </div>
+            <div style="font-size:11.5px;color:var(--ink-faint);cursor:pointer;margin-top:3px;text-decoration:underline" onclick="event.stopPropagation(); resetTrainerPin('${t.id}', '${t.name}')">Reset PIN</div>
           </div>
         </div>
         <div class="trainer-count">${count} client${count===1?'':'s'}</div>
@@ -744,6 +750,31 @@ function renderTrainers(){
         </div>
       </div>`;
   }).join('');
+}
+
+function copyTrainerLink(name, token){
+  const url = BASE_URL + '?id=' + token;
+  const firstName = name.split(' ')[0];
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(
+      () => showToast('🔗 Copied ' + firstName + "'s login link"),
+      () => showToast(url)
+    );
+  } else {
+    showToast(url);
+  }
+}
+
+async function resetTrainerPin(trainerId, name){
+  try {
+    await sbReq(`checkin_trainers?id=eq.${trainerId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({pin: null})});
+  } catch(e){
+    showToast('✗ Could not reset — try again');
+    return;
+  }
+  await loadRealData();
+  renderTrainers();
+  showToast(`✓ PIN cleared — ${name.split(' ')[0]} will set a new one next time they log in`);
 }
 
 function clientRowHtml(c){
@@ -1083,6 +1114,9 @@ function renderOrgPicker(){
 }
 function pickOrg(id){
   document.querySelectorAll('#new-client-org .trainer-opt').forEach(o => o.classList.toggle('selected', o.dataset.oid === id));
+  selectedDids = [];
+  selectedActionIds = [];
+  renderAddClientPicker();
 }
 
 async function addOrg(){
@@ -1105,28 +1139,69 @@ async function addOrg(){
 // Real catalog, fetched at init — replaces what used to be a hardcoded list
 // with fake string IDs that never matched anything in the real database.
 let DID_CATALOG = [];
+let ACTION_CATALOG = []; // each with its own item pool, org-scoped
+const CATEGORY_EMOJI = {
+  Sleep:'🌙', 'Sleep & Circadian Rhythm':'🌙',
+  Food:'🍎', Nutrition:'🍎',
+  Move:'🏃', Exercise:'🏃', 'Movement & NEAT':'🏃',
+  Zen:'🧘',
+  'Hydration & Electrolytes':'💧'
+};
 async function loadCatalog(){
   try {
-    const rows = await sbReq('checkin_library_items?select=id,category,name&order=category');
-    const emoji = {Sleep:'🌙', Food:'🍎', Move:'🏃', Zen:'🧘'};
-    DID_CATALOG = (rows||[]).map(r => ({id: r.id, category: r.category, emoji: emoji[r.category]||'', name: r.name}));
+    const rows = await sbReq('checkin_library_items?select=id,org_id,category,name&archived_at=is.null&order=category');
+    DID_CATALOG = (rows||[]).map(r => ({id: r.id, orgId: r.org_id, category: r.category, emoji: CATEGORY_EMOJI[r.category]||'✨', name: r.name}));
   } catch(e){ DID_CATALOG = []; }
+  try {
+    const actionRows = await sbReq('checkin_actions?select=id,org_id,name,description&archived_at=is.null&order=name');
+    const poolRows = await sbReq('checkin_action_items?select=action_id,library_item_id&order=display_order');
+    ACTION_CATALOG = (actionRows||[]).map(a => ({
+      id: a.id, orgId: a.org_id, name: a.name, description: a.description,
+      itemIds: (poolRows||[]).filter(p => p.action_id === a.id).map(p => p.library_item_id)
+    }));
+  } catch(e){ ACTION_CATALOG = []; }
 }
 let selectedDids = [];
+let selectedActionIds = [];
 
-function renderDidPicker(){
-  let html = '', lastCat = null;
-  DID_CATALOG.forEach(item => {
-    if(item.category !== lastCat){ html += `<div class="did-cat-header">${item.emoji} ${item.category}</div>`; lastCat = item.category; }
-    html += `<div class="did-check-row" data-did="${item.id}" onclick="toggleDid('${item.id}')">
-      <div class="did-checkbox"></div><div class="did-check-name">${item.name}</div></div>`;
-  });
-  document.getElementById('new-client-dids').innerHTML = html;
+function renderAddClientPicker(){
+  const orgOpt = document.querySelector('#new-client-org .trainer-opt.selected');
+  const orgId = orgOpt ? orgOpt.dataset.oid : null;
+  const orgActions = ACTION_CATALOG.filter(a => a.orgId === orgId);
+  const container = document.getElementById('new-client-dids');
+  document.getElementById('new-client-dids-label').innerHTML = orgActions.length
+    ? 'Starting actions <span style="font-weight:400;color:var(--ink-faint)">— optional, add more anytime</span>'
+    : 'Starting dids <span style="font-weight:400;color:var(--ink-faint)">— optional, add more anytime</span>';
+
+  if(orgActions.length){
+    // This org's clients work through Actions — pick which ones apply, then
+    // narrow down to specific dids and set goals afterward on their plan page,
+    // same as adding an action to an existing client.
+    container.innerHTML = orgActions.map(a => `
+      <div class="did-check-row" data-action="${a.id}" onclick="toggleActionSelect('${a.id}')">
+        <div class="did-checkbox"></div>
+        <div class="did-check-name">${a.name}${a.description ? `<div style="font-size:11.5px;font-weight:400;color:var(--ink-faint);margin-top:1px">${a.description}</div>` : ''}</div>
+      </div>`).join('');
+  } else {
+    const orgDids = DID_CATALOG.filter(d => d.orgId === orgId || d.orgId === null);
+    let html = '', lastCat = null;
+    orgDids.forEach(item => {
+      if(item.category !== lastCat){ html += `<div class="did-cat-header">${item.emoji} ${item.category}</div>`; lastCat = item.category; }
+      html += `<div class="did-check-row" data-did="${item.id}" onclick="toggleDid('${item.id}')">
+        <div class="did-checkbox"></div><div class="did-check-name">${item.name}</div></div>`;
+    });
+    container.innerHTML = html;
+  }
 }
 function toggleDid(id){
   const row = document.querySelector(`.did-check-row[data-did="${id}"]`);
   const on = row.classList.toggle('selected');
   if(on) selectedDids.push(id); else selectedDids = selectedDids.filter(d => d !== id);
+}
+function toggleActionSelect(id){
+  const row = document.querySelector(`.did-check-row[data-action="${id}"]`);
+  const on = row.classList.toggle('selected');
+  if(on) selectedActionIds.push(id); else selectedActionIds = selectedActionIds.filter(d => d !== id);
 }
 
 function toggleNewDidForm(){
@@ -1154,10 +1229,13 @@ async function createNewDid(){
   const minValue = isNumeric ? parseFloat(document.getElementById('new-did-min').value || '0') : null;
   const maxValue = isNumeric ? parseFloat(document.getElementById('new-did-max').value || '100') : null;
 
+  const orgOpt = document.querySelector('#new-client-org .trainer-opt.selected');
+  const orgId = orgOpt ? orgOpt.dataset.oid : null;
+
   let newItem;
   try {
     const rows = await sbReq('checkin_library_items', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify({
-      category, name, type, unit, min_value: minValue, max_value: maxValue, question: name
+      category, name, type, unit, min_value: minValue, max_value: maxValue, question: name, org_id: orgId
     })});
     newItem = rows[0];
   } catch(e){
@@ -1165,10 +1243,9 @@ async function createNewDid(){
     return;
   }
 
-  const emoji = {Sleep:'🌙', Food:'🍎', Move:'🏃', Zen:'🧘'};
-  DID_CATALOG.push({id:newItem.id, category:newItem.category, emoji:emoji[newItem.category]||'', name:newItem.name});
+  DID_CATALOG.push({id:newItem.id, orgId:newItem.org_id, category:newItem.category, emoji:CATEGORY_EMOJI[newItem.category]||'✨', name:newItem.name});
   DID_CATALOG.sort((a,b) => a.category.localeCompare(b.category));
-  renderDidPicker();
+  renderAddClientPicker();
   toggleDid(newItem.id); // pre-select it — Dave just made this specifically for this client
 
   document.getElementById('new-did-name').value = '';
@@ -1186,7 +1263,8 @@ function openAddClient(fromRoster){
     document.getElementById('trainer-locked-name').textContent = trainerOf(currentTrainerId).name + ' (you)';
   }
   selectedDids = [];
-  renderDidPicker();
+  selectedActionIds = [];
+  renderAddClientPicker();
   showScreen('screen-add-client');
 }
 
@@ -1222,7 +1300,7 @@ async function addTrainer(){
 
 let pendingClientLinkReturn = null; // where to go once they dismiss the link screen
 
-function copyClientLink(){
+function copyNewClientLink(){
   const text = document.getElementById('client-link-text').textContent;
   navigator.clipboard.writeText(text).then(() => {
     document.getElementById('client-link-copy-btn').textContent = '✓ Copied';
@@ -1269,6 +1347,15 @@ async function addClient(){
       await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(assignmentRows)});
     } catch(e){ /* client itself was created fine — starting dids can be added by hand if this fails */ }
   }
+  if(selectedActionIds.length){
+    // Assigning the action itself here — narrowing down to specific dids and
+    // setting goals happens afterward on their plan page, same flow as adding
+    // an action to any existing client.
+    const clientActionRows = selectedActionIds.map(actionId => ({ client_id: newClient.id, action_id: actionId }));
+    try {
+      await sbReq('checkin_client_actions', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(clientActionRows)});
+    } catch(e){ /* client itself was created fine — actions can be assigned by hand from their plan page if this fails */ }
+  }
 
   const wasSignup = pendingSignup;
   if(wasSignup){
@@ -1289,7 +1376,10 @@ async function addClient(){
   document.getElementById('client-link-text').textContent = `https://dolifebetter.fit/?id=${newClient.token}`;
   document.getElementById('client-link-copy-btn').textContent = 'Copy Link';
   showScreen('screen-client-link');
-  const didsMsg = selectedDids.length ? ` with ${selectedDids.length} did${selectedDids.length===1?'':'s'}` : '';
+  const parts = [];
+  if(selectedDids.length) parts.push(`${selectedDids.length} did${selectedDids.length===1?'':'s'}`);
+  if(selectedActionIds.length) parts.push(`${selectedActionIds.length} action${selectedActionIds.length===1?'':'s'}`);
+  const didsMsg = parts.length ? ` with ${parts.join(' and ')}` : '';
   if(wasSignup){
     await updateSignupsLink();
     showToast(`✓ ${name.split(' ')[0]} set up from their signup`);
