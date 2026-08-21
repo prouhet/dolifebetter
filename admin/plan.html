@@ -1030,7 +1030,7 @@ function pickItem(id, actionId){
   pendingActionId = actionId || null;
   pendingItem = LIBRARY.find(l => l.id === id);
   const first = CLIENT.name.split(' ')[0];
-  document.getElementById('config-heading').textContent = `Set ${first}'s plan`;
+  document.getElementById('config-heading').textContent = `Set ${first}'s ${pendingItem.name}`;
   document.getElementById('save-btn-label').textContent = `Assign to ${first}`;
   document.getElementById('config-back-link').innerHTML = '← Back to library';
   document.getElementById('edit-in-library-row').classList.add('hidden');
