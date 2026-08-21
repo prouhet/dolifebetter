@@ -560,7 +560,7 @@ async function init(){
     const item = current.checkin_library_items;
     return {
       assignmentId: current.id, libId: item.id, name: item.name, type: item.type, unit: item.unit, actionId: current.action_id || null,
-      consistencyTargetDays: current.consistency_target_days ?? null, consistencyTargetWindow: current.consistency_target_window ?? null,
+      consistencyTargetDays: current.consistency_target_days ?? null, consistencyTargetWindow: current.consistency_target_window ?? null, goalMetAt: current.goal_met_at ?? null,
       goal: current.goal, goalLabel: current.goal_label, inputStyle: current.input_style,
       scheduleType: current.schedule_type, days: current.days||[], weeklyCount: current.weekly_count,
       history: rows.map(r => ({goal: r.goal, from: fmtDate(r.effective_from), to: r.effective_to ? fmtDate(r.effective_to) : 'now'}))
@@ -577,7 +577,7 @@ async function init(){
       .map(ai => {
         const item = ai.checkin_library_items;
         const live = assigned.find(a => a.libId === item.id);
-        return { libId: item.id, name: item.name, type: item.type, live: !!live, assignmentId: live ? live.assignmentId : null };
+        return { libId: item.id, name: item.name, type: item.type, live: !!live, assignmentId: live ? live.assignmentId : null, goalMetAt: live ? live.goalMetAt : null };
       });
     return { clientActionId: ca.id, actionId: ca.action_id, name: ca.checkin_actions.name, description: ca.checkin_actions.description, pool };
   });
@@ -634,7 +634,7 @@ function renderAssignedActions(){
         ${ca.pool.map(p => `
           <div class="history-row ${p.live ? 'current' : ''}" style="cursor:pointer" onclick="event.stopPropagation(); ${p.live ? `openEditAssignment('${p.assignmentId}')` : `pickItem('${p.libId}', '${ca.actionId}')`}">
             <span>${typeIcon(p.type)} ${p.name}</span>
-            <span class="val">${p.live ? '✓ live' : '+ add'}</span>
+            <span class="val">${p.goalMetAt ? '⭐ goal met' : p.live ? '✓ live' : '+ add'}</span>
           </div>
         `).join('')}
         <div style="text-align:center;font-size:12.5px;color:var(--care);cursor:pointer;padding-top:10px" onclick="event.stopPropagation(); removeAction('${ca.clientActionId}')">Remove this action</div>
