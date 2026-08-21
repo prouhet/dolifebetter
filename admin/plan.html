@@ -1197,7 +1197,7 @@ async function assignItem(){
   pendingActionId = null;
   await init();
   showScreen('screen-plan');
-  showToast(wasEditing ? '✓ Changes saved' : `✓ Assigned to ${CLIENT.name.split(' ')[0]}`);
+  showToast(wasEditing ? `✓ ${pendingItem.name} — changes saved` : `✓ ${pendingItem.name} assigned to ${CLIENT.name.split(' ')[0]}`);
 }
 
 init();
