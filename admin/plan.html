@@ -221,6 +221,34 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       </div>
     </div>
 
+    <!-- SCREEN: GOAL MET — RESOLVE -->
+    <div id="screen-goal-resolve" class="hidden">
+      <div class="back-link" onclick="showScreen('screen-plan')">← Back to <span id="goal-resolve-back-name">their</span> plan</div>
+      <div class="section-label" style="margin-top:0">⭐ Goal met</div>
+      <div id="goal-resolve-summary" style="font-size:14px;color:var(--ink-dim);margin-bottom:20px;line-height:1.5"></div>
+
+      <div class="picker-item" onclick="raiseGoal()" style="margin-bottom:10px">
+        <div class="picker-name">Keep it — raise the goal
+          <div style="font-size:12.5px;font-weight:400;color:var(--ink-faint);margin-top:2px">Same did, higher bar. Good when it's genuinely working.</div>
+        </div>
+      </div>
+      <div class="picker-item" onclick="openSwapPicker()">
+        <div class="picker-name">Try something else from the plan
+          <div style="font-size:12.5px;font-weight:400;color:var(--ink-faint);margin-top:2px">Swap in a different did from an assigned action.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCREEN: SWAP TO A DIFFERENT ITEM -->
+    <div id="screen-swap-pick" class="hidden">
+      <div class="back-link" onclick="showScreen('screen-goal-resolve')">← Back</div>
+      <div class="section-label" style="margin-top:0">Swap in something else</div>
+      <div class="picker-list" id="swap-picker-list"></div>
+      <div id="swap-picker-empty" class="hidden" style="font-size:13.5px;color:var(--ink-faint);padding:8px 0">
+        Nothing else available — every item across their assigned actions is already live.
+      </div>
+    </div>
+
     <!-- SCREEN: PICK ACTION -->
     <div id="screen-action-pick" class="hidden">
       <div class="back-link" onclick="showScreen('screen-plan')">← Back to <span id="action-pick-back-name">their</span> plan</div>
@@ -364,7 +392,7 @@ function toggleTheme(){applyTheme(!document.body.classList.contains('dark'));}
 applyTheme(false);
 
 function showScreen(id){
-  ['screen-plan','screen-action-pick','screen-pick','screen-config'].forEach(s => {
+  ['screen-plan','screen-action-pick','screen-goal-resolve','screen-swap-pick','screen-pick','screen-config'].forEach(s => {
     document.getElementById(s).classList.toggle('hidden', s!==id);
   });
 }
@@ -476,6 +504,7 @@ let assigned = [];
 let actions = [];        // this org's available actions, each with its item pool
 let clientActions = [];  // actions currently assigned to this client
 let pendingActionId = null; // set when picking an item from an action's pool, so the resulting assignment gets tagged
+let resolvingAssignmentId = null; // the assignment currently being resolved after its goal was met
 let RESPONSES = []; // this client's real logged answers, one row per item per day
 
 async function init(){
@@ -569,6 +598,14 @@ async function init(){
 
   actions = actionRows || [];
 
+  // Whether an org "uses Actions" isn't a flag anyone has to remember to set —
+  // it's just whether that org has any actions in its catalog. Premier U does,
+  // Studio Strong doesn't yet, so this falls out correctly with zero config,
+  // and stays correct automatically if that ever changes for either org.
+  const orgUsesActions = actions.length > 0;
+  document.getElementById('actions-section').classList.toggle('hidden', !orgUsesActions);
+  document.getElementById('dids-section').classList.toggle('hidden', orgUsesActions);
+
   // For each currently-assigned action, attach its full item pool, marking which
   // pool items are already live (found in `assigned`) vs. still available to add.
   clientActions = (clientActionRows || []).map(ca => {
@@ -632,7 +669,7 @@ function renderAssignedActions(){
       ${ca.description ? `<div class="freq-label" style="margin-top:2px">${ca.description}</div>` : ''}
       <div class="history-panel hidden" id="action-pool-${i}">
         ${ca.pool.map(p => `
-          <div class="history-row ${p.live ? 'current' : ''}" style="cursor:pointer" onclick="event.stopPropagation(); ${p.live ? `openEditAssignment('${p.assignmentId}')` : `pickItem('${p.libId}', '${ca.actionId}')`}">
+          <div class="history-row ${p.live ? 'current' : ''}" style="cursor:pointer" onclick="event.stopPropagation(); ${p.goalMetAt ? `openGoalResolve('${p.assignmentId}')` : p.live ? `openEditAssignment('${p.assignmentId}')` : `pickItem('${p.libId}', '${ca.actionId}')`}">
             <span>${typeIcon(p.type)} ${p.name}</span>
             <span class="val">${p.goalMetAt ? '⭐ goal met' : p.live ? '✓ live' : '+ add'}</span>
           </div>
@@ -780,6 +817,62 @@ async function removeAction(clientActionId){
   // Removing the action just closes out its grouping — any dids already live
   // from its pool keep running exactly as they were, on purpose.
   showToast(liveCount > 0 ? `✓ Action removed — ${liveCount} active did${liveCount===1?'':'s'} still running` : '✓ Action removed');
+}
+
+function openGoalResolve(assignmentId){
+  const a = assigned.find(x => x.assignmentId === assignmentId);
+  if(!a) return;
+  resolvingAssignmentId = assignmentId;
+  const first = CLIENT.name.split(' ')[0];
+  document.getElementById('goal-resolve-back-name').textContent = `${first}'s`;
+  const target = (a.consistencyTargetDays != null && a.consistencyTargetWindow != null)
+    ? `${a.consistencyTargetDays} of the last ${a.consistencyTargetWindow} days`
+    : 'their goal';
+  document.getElementById('goal-resolve-summary').textContent =
+    `${a.name} — hit ${target}. Keep the same did with a higher bar, or swap in something else from ${first}'s assigned actions.`;
+  showScreen('screen-goal-resolve');
+}
+
+function raiseGoal(){
+  openEditAssignment(resolvingAssignmentId);
+}
+
+function openSwapPicker(){
+  const current = assigned.find(x => x.assignmentId === resolvingAssignmentId);
+  const options = [];
+  clientActions.forEach(ca => {
+    ca.pool.forEach(p => {
+      if(current && p.libId === current.libId) return; // don't offer to "swap" to itself
+      if(p.live) return; // already running elsewhere isn't a real swap target
+      options.push({ ...p, actionName: ca.name, actionId: ca.actionId });
+    });
+  });
+  document.getElementById('swap-picker-empty').classList.toggle('hidden', options.length > 0);
+  document.getElementById('swap-picker-list').innerHTML = options.map(o => `
+    <div class="picker-item" onclick="swapToItem('${o.libId}', '${o.actionId}')">
+      <div class="picker-name">${o.name}
+        <div style="font-size:12px;font-weight:400;color:var(--ink-faint);margin-top:2px">${o.actionName}</div>
+      </div>
+    </div>
+  `).join('');
+  showScreen('screen-swap-pick');
+}
+
+async function swapToItem(newLibId, newActionId){
+  const old = assigned.find(x => x.assignmentId === resolvingAssignmentId);
+  const today = localISO(new Date());
+  try {
+    await sbReq(`checkin_assignments?id=eq.${resolvingAssignmentId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({effective_to: today})});
+  } catch(e){
+    showToast('✗ Could not swap — try again');
+    return;
+  }
+  await init();
+  pickItem(newLibId, newActionId);
+  // Carry over the same consistency bar they'd already agreed was working —
+  // easy to change, just saves re-typing the same numbers for a like-for-like swap.
+  if(old && old.consistencyTargetDays != null) document.getElementById('consistency-days-input').value = old.consistencyTargetDays;
+  if(old && old.consistencyTargetWindow != null) document.getElementById('consistency-window-input').value = old.consistencyTargetWindow;
 }
 
 function openPicker(){
