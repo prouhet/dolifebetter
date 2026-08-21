@@ -271,6 +271,11 @@ function dotRowHtml(states){
     </div>`).join('') + `</div>`;
 }
 
+function goalMetBadge(a){
+  if(!a.goal_met_at) return '';
+  return ` <span style="display:inline-flex;align-items:center;gap:3px;font-size:11.5px;font-weight:600;color:var(--teal-deep);background:var(--teal-tint);padding:2px 8px;border-radius:100px;vertical-align:middle">⭐ Goal met</span>`;
+}
+
 function renderStats(assignRows, responseRows){
   const list = document.getElementById('stats-list');
   const empty = document.getElementById('stats-empty');
@@ -325,7 +330,7 @@ function renderStats(assignRows, responseRows){
       if(streak > bestStreak){ bestStreak = streak; bestStreakName = item.name; }
       html += `
         <div class="stat-card">
-          <div class="stat-name">${escapeHtml(item.name)}${a.goal_label ? ` <span style="color:var(--ink-faint);font-weight:500">· ${escapeHtml(a.goal_label)}</span>` : ''}</div>
+          <div class="stat-name">${escapeHtml(item.name)}${a.goal_label ? ` <span style="color:var(--ink-faint);font-weight:500">· ${escapeHtml(a.goal_label)}</span>` : ''}${goalMetBadge(a)}</div>
           <div class="stat-line"><b>${count}</b> of the last 14 days${goalCount ? ` <span style="color:var(--ink-faint)">· goal ${goalCount} over 2 weeks</span>` : ''}</div>
           ${dotRowHtml(days.map(d => d.state))}
         </div>`;
@@ -335,7 +340,7 @@ function renderStats(assignRows, responseRows){
       const unit = item.unit || '';
       html += `
         <div class="stat-card">
-          <div class="stat-name">${escapeHtml(item.name)}</div>
+          <div class="stat-name">${escapeHtml(item.name)}${goalMetBadge(a)}</div>
           <div class="stat-line">${avg!=null ? `Averaging <b>${avg}${unit}</b>${a.goal!=null ? ` toward your ${a.goal}${unit} goal` : ''}` : 'No numbers logged yet'}</div>
           ${dotRowHtml(days.map(d => d.state))}
         </div>`;
@@ -344,7 +349,7 @@ function renderStats(assignRows, responseRows){
       const mostRecent = loggedDays.length ? loggedDays[loggedDays.length-1].value : null;
       html += `
         <div class="stat-card">
-          <div class="stat-name">${escapeHtml(item.name)}</div>
+          <div class="stat-name">${escapeHtml(item.name)}${goalMetBadge(a)}</div>
           <div class="stat-line"><b>${loggedDays.length}</b> of the last 14 days${mostRecent ? ` <span style="color:var(--ink-faint)">· most recent: ${escapeHtml(mostRecent)}</span>` : ''}</div>
           ${dotRowHtml(days.map(d => d.state))}
         </div>`;
@@ -353,7 +358,7 @@ function renderStats(assignRows, responseRows){
       const lastEntry = loggedDays.length ? loggedDays[loggedDays.length-1].value : null;
       html += `
         <div class="stat-card">
-          <div class="stat-name">${escapeHtml(item.name)}</div>
+          <div class="stat-name">${escapeHtml(item.name)}${goalMetBadge(a)}</div>
           <div class="stat-line">Shared <b>${loggedDays.length}</b> of the last 14 days</div>
           ${dotRowHtml(days.map(d => d.state))}
           ${lastEntry ? `<div class="reflection-note">"${escapeHtml(lastEntry)}"</div>` : ''}
