@@ -539,6 +539,7 @@ function renderPoll(){
       const goal = a.goal;
       const min = item.min_value != null ? item.min_value : 0;
       const max = item.max_value != null ? item.max_value : 100;
+      const step = item.step_value != null ? item.step_value : 1;
       const unit = item.unit || '';
       if(a.input_style === 'textbox'){
         return `
@@ -559,7 +560,7 @@ function renderPoll(){
             <div class="q-row"><div class="q-label">${item.question}</div></div>
             <div class="slider-value-row"><span class="slider-value ${existing==null?'untouched':''}" id="sliderval-${a.id}">${existing!=null?existing+unit:'Drag to log'}</span></div>
             <div class="slider-track-wrap">
-              <input type="range" min="${min}" max="${max}" step="1" value="${val}" class="slider" id="slider-${a.id}"
+              <input type="range" min="${min}" max="${max}" step="${step}" value="${val}" class="slider" id="slider-${a.id}"
                 style="--pct:${pct}%" oninput="answerSlider('${a.id}', this, ${min}, ${max}, '${unit}')">
               ${goalPct!=null ? `<div class="goal-marker" style="left:${goalPct}%"></div><div class="goal-marker-label" style="left:${goalPct}%">Goal</div>`:''}
             </div>
