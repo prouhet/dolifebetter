@@ -169,8 +169,9 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <div class="client-meta" id="client-meta"></div>
         </div>
       </div>
-      <div style="display:flex;gap:18px;margin:-8px 0 20px">
+      <div style="display:flex;gap:18px;margin:-8px 0 20px;flex-wrap:wrap">
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="showClientLink()">🔗 Get their link</div>
+        <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="previewCheckin()">👀 Preview their check-in</div>
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="openChangeTrainer()">↔️ Change trainer</div>
       </div>
 
@@ -465,6 +466,11 @@ function showClientLink(){
   document.getElementById('link-modal-text').textContent = `https://dolifebetter.fit/?id=${CLIENT.token}`;
   document.getElementById('link-modal-copy-btn').textContent = 'Copy Link';
   document.getElementById('link-modal').classList.remove('hidden');
+}
+function previewCheckin(){
+  // preview=1 skips PIN entry (already authenticated as staff here) and
+  // blocks real data from being written — see index.html's doSubmit().
+  window.open(`https://dolifebetter.fit/?id=${CLIENT.token}&preview=1`, '_blank');
 }
 function closeClientLinkModal(){
   document.getElementById('link-modal').classList.add('hidden');
