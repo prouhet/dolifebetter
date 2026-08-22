@@ -147,6 +147,10 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
 <div class="wrapper">
   <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">🌙</button>
 
+  <div id="preview-banner" class="hidden" style="position:sticky;top:0;z-index:20;background:#7C3AED;color:#fff;text-align:center;font-size:12.5px;font-weight:700;padding:8px 12px;letter-spacing:.02em;text-transform:uppercase;margin:-1px -1px 14px -1px;border-radius:8px 8px 0 0">
+    👀 Preview only — nothing here gets saved
+  </div>
+
   <div id="screen-loading" class="screen loading-state">
     <span class="loading-dot"></span><span class="loading-dot"></span><span class="loading-dot"></span>
   </div>
@@ -366,6 +370,7 @@ function showScreen(id){
 // ─── State ─────────────────────────────────────────────────────────────────
 const params = new URLSearchParams(window.location.search);
 const CLIENT_TOKEN = params.get('id');
+const PREVIEW_MODE = params.get('preview') === '1'; // trainer looking at what their client sees — never writes real data
 let CLIENT = null;
 let ASSIGNMENTS = [];
 let ANSWERS = {};
@@ -481,6 +486,7 @@ async function continueAfterVerify(){
 }
 
 async function init(){
+  if(PREVIEW_MODE) document.getElementById('preview-banner').classList.remove('hidden');
   if(!CLIENT_TOKEN){ window.location.href = 'get-started.html'; return; }
   let rows;
   try {
@@ -492,7 +498,10 @@ async function init(){
   // One-time identity check per device — protects against a forwarded or
   // glanced-at link without adding friction to daily use. Once confirmed,
   // this device is trusted for this specific client going forward.
-  if(!isVerifiedOnThisDevice()){
+  // Preview mode (trainer looking at what their client sees) skips this —
+  // already authenticated as staff — but never marks the device verified,
+  // so it has no effect on the client's own future visits.
+  if(!PREVIEW_MODE && !isVerifiedOnThisDevice()){
     document.getElementById('verify-greeting').textContent = `Hey ${CLIENT.name.split(' ')[0]} 👋`;
     showScreen('screen-verify');
     return;
@@ -680,6 +689,10 @@ async function upsertDaily(payload){
 }
 
 async function doSubmit(note){
+  if(PREVIEW_MODE){
+    await showConfirm(needsHelpChecked, note); // same confirmation a client would see, just nothing was actually written
+    return;
+  }
   const dailyPayload = {
     client_id: CLIENT.id,
     checkin_date: todayISO(),
