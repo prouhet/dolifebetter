@@ -379,8 +379,15 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <div class="config-label">Consistency goal <span style="font-weight:400;color:var(--ink-faint)">— optional, when to consider this a habit worth building on</span></div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <input type="number" id="consistency-days-input" placeholder="12" style="width:64px;text-align:center">
-            <span style="font-size:13px;color:var(--ink-dim)">of the last</span>
-            <input type="number" id="consistency-window-input" placeholder="14" style="width:64px;text-align:center">
+            <span style="font-size:13px;color:var(--ink-dim)">times, however long it takes</span>
+          </div>
+        </div>
+
+        <div class="config-row">
+          <div class="config-label">Check back in <span style="font-weight:400;color:var(--ink-faint)">— optional, a reminder to revisit this if the goal above hasn't been hit yet</span></div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:13px;color:var(--ink-dim)">after</span>
+            <input type="number" id="review-after-input" placeholder="21" style="width:64px;text-align:center">
             <span style="font-size:13px;color:var(--ink-dim)">days</span>
           </div>
         </div>
@@ -603,7 +610,7 @@ async function init(){
     const item = current.checkin_library_items;
     return {
       assignmentId: current.id, libId: item.id, name: item.name, type: item.type, unit: item.unit, actionId: current.action_id || null,
-      consistencyTargetDays: current.consistency_target_days ?? null, consistencyTargetWindow: current.consistency_target_window ?? null, goalMetAt: current.goal_met_at ?? null,
+      consistencyTargetDays: current.consistency_target_days ?? null, consistencyTargetWindow: current.consistency_target_window ?? null, reviewAfterDays: current.review_after_days ?? null, goalMetAt: current.goal_met_at ?? null,
       goal: current.goal, goalLabel: current.goal_label, inputStyle: current.input_style,
       scheduleType: current.schedule_type, days: current.days||[], weeklyCount: current.weekly_count, rawEffectiveFrom: current.effective_from,
       history: rows.map(r => ({goal: r.goal, from: fmtDate(r.effective_from), to: r.effective_to ? fmtDate(r.effective_to) : 'now'}))
@@ -763,32 +770,14 @@ function renderStatsTab(){
     const rows = RESPONSES.filter(r => r.library_item_id === a.libId);
     const header = `<div class="assigned-name-row"><div class="assigned-name-block"><div class="type-badge ${a.type}">${typeIcon(a.type)}</div><div class="assigned-name">${a.name}</div></div></div>`;
 
-    if(a.type === 'numeric' || a.type === 'reflection'){
-      // A number or free text is a real value, not just hit/miss — worth
-      // seeing in full, but not cluttering the default view. Same raw list
-      // as before, just tucked behind a dropdown instead of always-open.
-      if(!rows.length){
-        return `<div class="assigned-card">${header}<div style="font-size:13px;color:var(--ink-faint);margin-top:6px">No check-ins logged yet.</div></div>`;
-      }
-      const rowHtml = r => a.type === 'reflection'
-        ? `<div class="history-row" style="flex-direction:column;align-items:flex-start;gap:3px"><span style="color:var(--ink-faint);font-size:12px">${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val" style="font-weight:400;color:var(--ink)">${escapeHtml(r.value)}</span></div>`
-        : `<div class="history-row"><span>${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val">${escapeHtml(r.value)}</span></div>`;
-      return `
-        <div class="assigned-card">
-          ${header}
-          <div class="stat-details-toggle" onclick="toggleStatsExpand(${i})">▸ Show details (${rows.length} logged)</div>
-          <div class="history-panel hidden" id="stats-expand-${i}">${rows.map(rowHtml).join('')}</div>
-        </div>`;
-    }
-
-    // yesno / choice — schedule-aware dot-row, same white/amber/green
-    // semantics as the roster: white = wasn't expected, amber = expected
-    // but nothing logged, green = they checked in.
+    // Same dot-row for every item type — white/amber/green, schedule-aware,
+    // same rule the roster already uses: green means something was logged
+    // that day, regardless of what the actual value was.
     const byDate = {};
     rows.forEach(r => { byDate[r.checkin_daily.checkin_date] = r; });
     const today = new Date();
     let dotsHtml = '';
-    for(let d=13; d>=0; d--){
+    for(let d=6; d>=0; d--){
       const date = new Date(today); date.setDate(date.getDate() - d);
       const dateStr = localISO(date);
       const dow = DOW_SHORT[date.getDay()];
@@ -798,11 +787,28 @@ function renderStatsTab(){
       else if(isItemExpectedOn(a, dateStr, dow)) cls = 'amber';
       dotsHtml += `<div class="stat-dot-col"><div class="stat-dot-label">${label}</div><div class="stat-dot ${cls}" title="${fmtDate(dateStr)}"></div></div>`;
     }
-    return `
-      <div class="assigned-card">
-        ${header}
-        <div class="stat-dot-row">${dotsHtml}</div>
-      </div>`;
+    const dotRow = `<div class="stat-dot-row">${dotsHtml}</div>`;
+
+    // A number or free text is a real value, not just hit/miss — the dot-row
+    // above covers "did they check in", this covers "what did they actually
+    // say", tucked behind a dropdown so it doesn't clutter the default view.
+    if(a.type === 'numeric' || a.type === 'reflection'){
+      if(!rows.length){
+        return `<div class="assigned-card">${header}${dotRow}<div style="font-size:13px;color:var(--ink-faint);margin-top:8px">No check-ins logged yet.</div></div>`;
+      }
+      const rowHtml = r => a.type === 'reflection'
+        ? `<div class="history-row" style="flex-direction:column;align-items:flex-start;gap:3px"><span style="color:var(--ink-faint);font-size:12px">${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val" style="font-weight:400;color:var(--ink)">${escapeHtml(r.value)}</span></div>`
+        : `<div class="history-row"><span>${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val">${escapeHtml(r.value)}</span></div>`;
+      return `
+        <div class="assigned-card">
+          ${header}
+          ${dotRow}
+          <div class="stat-details-toggle" onclick="toggleStatsExpand(${i})">▸ Show details (${rows.length} logged)</div>
+          <div class="history-panel hidden" id="stats-expand-${i}">${rows.map(rowHtml).join('')}</div>
+        </div>`;
+    }
+
+    return `<div class="assigned-card">${header}${dotRow}</div>`;
   }).join('');
 }
 
@@ -870,8 +876,8 @@ function openGoalResolve(assignmentId){
   resolvingAssignmentId = assignmentId;
   const first = CLIENT.name.split(' ')[0];
   document.getElementById('goal-resolve-back-name').textContent = `${first}'s`;
-  const target = (a.consistencyTargetDays != null && a.consistencyTargetWindow != null)
-    ? `${a.consistencyTargetDays} of the last ${a.consistencyTargetWindow} days`
+  const target = (a.consistencyTargetDays != null)
+    ? `${a.consistencyTargetDays} times`
     : 'their goal';
   document.getElementById('goal-resolve-summary').textContent =
     `${a.name} — hit ${target}. Keep the same did with a higher bar, or swap in something else from ${first}'s assigned actions.`;
@@ -917,7 +923,7 @@ async function swapToItem(newLibId, newActionId){
   // Carry over the same consistency bar they'd already agreed was working —
   // easy to change, just saves re-typing the same numbers for a like-for-like swap.
   if(old && old.consistencyTargetDays != null) document.getElementById('consistency-days-input').value = old.consistencyTargetDays;
-  if(old && old.consistencyTargetWindow != null) document.getElementById('consistency-window-input').value = old.consistencyTargetWindow;
+  if(old && old.reviewAfterDays != null) document.getElementById('review-after-input').value = old.reviewAfterDays;
 }
 
 function openPicker(){
@@ -1092,7 +1098,7 @@ function pickItem(id, actionId){
   document.getElementById('goal-input').value = '';
   document.getElementById('target-input').value = '';
   document.getElementById('consistency-days-input').value = '';
-  document.getElementById('consistency-window-input').value = '';
+  document.getElementById('review-after-input').value = '';
   populateConfigContext(pendingItem, pendingActionId);
   document.querySelectorAll('#input-style-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.style === lastInputStyle));
   document.querySelectorAll('#mode-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.mode === 'days'));
@@ -1129,7 +1135,7 @@ function openEditAssignment(assignmentId){
   document.getElementById('goal-input').value = a.goal != null ? a.goal : '';
   document.getElementById('target-input').value = a.goalLabel || '';
   document.getElementById('consistency-days-input').value = a.consistencyTargetDays ?? '';
-  document.getElementById('consistency-window-input').value = a.consistencyTargetWindow ?? '';
+  document.getElementById('review-after-input').value = a.reviewAfterDays ?? '';
   populateConfigContext(pendingItem, pendingActionId);
   document.querySelectorAll('#input-style-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.style === (a.inputStyle||lastInputStyle)));
 
@@ -1210,16 +1216,16 @@ async function assignItem(){
   const inputStyle = pendingItem.type === 'numeric' ? document.querySelector('#input-style-toggle .mode-opt.selected').dataset.style : null;
   if(inputStyle) lastInputStyle = inputStyle;
   const consistencyDaysRaw = document.getElementById('consistency-days-input').value.trim();
-  const consistencyWindowRaw = document.getElementById('consistency-window-input').value.trim();
+  const reviewAfterRaw = document.getElementById('review-after-input').value.trim();
   const consistencyTargetDays = consistencyDaysRaw ? parseInt(consistencyDaysRaw, 10) : null;
-  const consistencyTargetWindow = consistencyWindowRaw ? parseInt(consistencyWindowRaw, 10) : null;
+  const reviewAfterDays = reviewAfterRaw ? parseInt(reviewAfterRaw, 10) : null;
 
   const payload = {
     client_id: CLIENT.id, library_item_id: pendingItem.id, action_id: pendingActionId,
     goal, goal_label: goalLabel, input_style: inputStyle,
     schedule_type: scheduleType, days: scheduleType==='days' ? days : null,
     weekly_count: scheduleType==='weekly' ? weeklyCount : null,
-    consistency_target_days: consistencyTargetDays, consistency_target_window: consistencyTargetWindow
+    consistency_target_days: consistencyTargetDays, review_after_days: reviewAfterDays
   };
 
   try {
