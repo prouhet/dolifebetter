@@ -81,6 +81,14 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
 .history-toggle{font-size:11.5px;color:var(--ink-faint);margin-top:10px;cursor:pointer;font-weight:500;display:flex;align-items:center;gap:4px}
 .history-toggle:hover{color:var(--ink-dim)}
 .history-panel{margin-top:10px;padding-top:10px;border-top:1px dashed var(--surface-soft);display:flex;flex-direction:column;gap:6px}
+.stat-dot-row{display:flex;gap:5px;margin-top:8px}
+.stat-dot-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.stat-dot-label{font-size:10px;color:var(--ink-faint);font-weight:600}
+.stat-dot{width:18px;height:18px;border-radius:6px}
+.stat-dot.green{background:var(--green)}
+.stat-dot.amber{background:var(--amber)}
+.stat-dot.neutral{background:transparent;border:1px solid var(--surface-soft)}
+.stat-details-toggle{font-size:12px;font-weight:600;color:var(--teal-deep);cursor:pointer;margin-top:8px}
 .history-row{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-faint)}
 .history-row .val{color:var(--ink-dim);font-weight:500}
 .history-row.current .val{color:var(--teal-deep);font-weight:700}
@@ -597,7 +605,7 @@ async function init(){
       assignmentId: current.id, libId: item.id, name: item.name, type: item.type, unit: item.unit, actionId: current.action_id || null,
       consistencyTargetDays: current.consistency_target_days ?? null, consistencyTargetWindow: current.consistency_target_window ?? null, goalMetAt: current.goal_met_at ?? null,
       goal: current.goal, goalLabel: current.goal_label, inputStyle: current.input_style,
-      scheduleType: current.schedule_type, days: current.days||[], weeklyCount: current.weekly_count,
+      scheduleType: current.schedule_type, days: current.days||[], weeklyCount: current.weekly_count, rawEffectiveFrom: current.effective_from,
       history: rows.map(r => ({goal: r.goal, from: fmtDate(r.effective_from), to: r.effective_to ? fmtDate(r.effective_to) : 'now'}))
     };
   });
@@ -730,6 +738,18 @@ function switchPlanTab(which){
   document.getElementById('tab-stats-btn').classList.toggle('active', which === 'stats');
 }
 
+const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+// Same rule as the roster: a day only counts as expected if this specific
+// assignment both covers that day-of-week AND was actually active as of
+// that date — otherwise the client hadn't started tracking it yet.
+function isItemExpectedOn(a, dateStr, dow){
+  if(a.rawEffectiveFrom && dateStr < a.rawEffectiveFrom) return false;
+  if(a.scheduleType === 'weekly') return true;
+  if(a.scheduleType === 'days') return (a.days || []).includes(dow);
+  return false;
+}
+
 function renderStatsTab(){
   const list = document.getElementById('stats-list');
   const empty = document.getElementById('stats-empty');
@@ -741,29 +761,47 @@ function renderStatsTab(){
   empty.classList.add('hidden');
   list.innerHTML = assigned.map((a, i) => {
     const rows = RESPONSES.filter(r => r.library_item_id === a.libId);
-    // RESPONSES already comes sorted newest-first from the query, so rows[0] is most recent.
-    if(!rows.length){
+    const header = `<div class="assigned-name-row"><div class="assigned-name-block"><div class="type-badge ${a.type}">${typeIcon(a.type)}</div><div class="assigned-name">${a.name}</div></div></div>`;
+
+    if(a.type === 'numeric' || a.type === 'reflection'){
+      // A number or free text is a real value, not just hit/miss — worth
+      // seeing in full, but not cluttering the default view. Same raw list
+      // as before, just tucked behind a dropdown instead of always-open.
+      if(!rows.length){
+        return `<div class="assigned-card">${header}<div style="font-size:13px;color:var(--ink-faint);margin-top:6px">No check-ins logged yet.</div></div>`;
+      }
+      const rowHtml = r => a.type === 'reflection'
+        ? `<div class="history-row" style="flex-direction:column;align-items:flex-start;gap:3px"><span style="color:var(--ink-faint);font-size:12px">${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val" style="font-weight:400;color:var(--ink)">${escapeHtml(r.value)}</span></div>`
+        : `<div class="history-row"><span>${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val">${escapeHtml(r.value)}</span></div>`;
       return `
         <div class="assigned-card">
-          <div class="assigned-name-row"><div class="assigned-name-block"><div class="type-badge ${a.type}">${typeIcon(a.type)}</div><div class="assigned-name">${a.name}</div></div></div>
-          <div style="font-size:13px;color:var(--ink-faint);margin-top:6px">No check-ins logged yet.</div>
+          ${header}
+          <div class="stat-details-toggle" onclick="toggleStatsExpand(${i})">▸ Show details (${rows.length} logged)</div>
+          <div class="history-panel hidden" id="stats-expand-${i}">${rows.map(rowHtml).join('')}</div>
         </div>`;
     }
-    const visible = rows.slice(0, 5);
-    const rest = rows.slice(5);
-    const rowHtml = r => a.type === 'reflection'
-      ? `<div class="history-row" style="flex-direction:column;align-items:flex-start;gap:3px"><span style="color:var(--ink-faint);font-size:12px">${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val" style="font-weight:400;color:var(--ink)">${escapeHtml(r.value)}</span></div>`
-      : `<div class="history-row"><span>${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val">${escapeHtml(r.value)}</span></div>`;
+
+    // yesno / choice — schedule-aware dot-row, same white/amber/green
+    // semantics as the roster: white = wasn't expected, amber = expected
+    // but nothing logged, green = they checked in.
+    const byDate = {};
+    rows.forEach(r => { byDate[r.checkin_daily.checkin_date] = r; });
+    const today = new Date();
+    let dotsHtml = '';
+    for(let d=13; d>=0; d--){
+      const date = new Date(today); date.setDate(date.getDate() - d);
+      const dateStr = localISO(date);
+      const dow = DOW_SHORT[date.getDay()];
+      const label = dateStr === localISO(today) ? 'Now' : date.toLocaleDateString('en-US', {weekday:'narrow'});
+      let cls = 'neutral';
+      if(byDate[dateStr]) cls = 'green';
+      else if(isItemExpectedOn(a, dateStr, dow)) cls = 'amber';
+      dotsHtml += `<div class="stat-dot-col"><div class="stat-dot-label">${label}</div><div class="stat-dot ${cls}" title="${fmtDate(dateStr)}"></div></div>`;
+    }
     return `
       <div class="assigned-card">
-        <div class="assigned-name-row"><div class="assigned-name-block"><div class="type-badge ${a.type}">${typeIcon(a.type)}</div><div class="assigned-name">${a.name}</div></div></div>
-        <div class="history-panel" style="margin-top:8px">
-          ${visible.map(rowHtml).join('')}
-        </div>
-        ${rest.length ? `
-          <div class="history-toggle" onclick="toggleStatsExpand(${i})">Show ${rest.length} more</div>
-          <div class="history-panel hidden" id="stats-expand-${i}">${rest.map(rowHtml).join('')}</div>
-        ` : ''}
+        ${header}
+        <div class="stat-dot-row">${dotsHtml}</div>
       </div>`;
   }).join('');
 }
@@ -773,8 +811,8 @@ function toggleStatsExpand(i){
   const wasHidden = panel.classList.contains('hidden');
   panel.classList.toggle('hidden');
   const toggle = panel.previousElementSibling;
-  if(toggle && toggle.classList.contains('history-toggle')){
-    toggle.textContent = wasHidden ? 'Show less' : `Show ${panel.children.length} more`;
+  if(toggle && toggle.classList.contains('stat-details-toggle')){
+    toggle.textContent = wasHidden ? '▾ Hide details' : `▸ Show details (${panel.children.length} logged)`;
   }
 }
 
