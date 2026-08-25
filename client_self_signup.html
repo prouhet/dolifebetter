@@ -53,6 +53,10 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 
 .field-block{margin-bottom:16px}
 .field-label{font-size:12.5px;font-weight:600;color:var(--ink-dim);margin-bottom:8px}
+.mode-opt{padding:10px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--surface);font-family:'DM Sans',sans-serif;font-size:13.5px;font-weight:600;color:var(--ink-dim);cursor:pointer}
+.mode-opt.selected{border-color:var(--teal);color:var(--teal-deep);background:var(--teal-tint)}
+.wizard-day-btn{width:36px;height:36px;border-radius:50%;border:1.5px solid var(--surface-soft);background:var(--surface);font-size:12px;font-weight:700;color:var(--ink-dim);cursor:pointer}
+.wizard-day-btn.selected{background:var(--teal);border-color:var(--teal);color:#fff}
 input[type=text]{width:100%;background:var(--surface);border:1.5px solid var(--surface-soft);border-radius:12px;
   color:var(--ink);font-family:'DM Sans',sans-serif;font-size:14px;padding:12px 15px;outline:none;transition:border-color .15s;box-shadow:var(--shadow-sm)}
 input:focus{border-color:var(--teal)}
@@ -146,7 +150,54 @@ input::placeholder{color:var(--ink-faint)}
     <div class="page-sub">Pick what sounds useful — your trainer will fine-tune the goals with you.</div>
     <div class="selection-count" id="selection-count">Nothing picked yet</div>
     <div id="dids-list"></div>
-    <button class="cta" onclick="goToReview()">Continue</button>
+    <button class="cta" onclick="startConfigWizard()">Continue</button>
+  </div>
+
+  <!-- SCREEN: PER-ITEM CONFIG WIZARD -->
+  <div id="screen-config-wizard" class="screen hidden">
+    <div class="back-link" onclick="wizardBack()">← Back</div>
+    <div class="page-title" id="wizard-title"></div>
+    <div class="page-sub" id="wizard-progress"></div>
+
+    <div id="wizard-preview" style="background:var(--surface-soft);border-radius:16px;padding:18px;margin-bottom:18px"></div>
+
+    <div id="wizard-goal-row" class="hidden" style="margin-bottom:18px">
+      <div class="field-label">Target</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="number" id="wizard-goal-input" style="width:100px;border-radius:12px;border:1.5px solid var(--surface-soft);padding:10px 12px;font-size:14px" oninput="updateWizardPreview()">
+        <span id="wizard-goal-unit" style="font-size:13px;color:var(--ink-dim)"></span>
+      </div>
+    </div>
+
+    <div id="wizard-style-row" class="hidden" style="margin-bottom:18px">
+      <div class="field-label">How you'll answer it</div>
+      <div style="display:flex;gap:8px">
+        <button class="mode-opt selected" data-style="slider" onclick="pickWizardStyle('slider')" style="flex:1">Slider</button>
+        <button class="mode-opt" data-style="textbox" onclick="pickWizardStyle('textbox')" style="flex:1">Type a number</button>
+      </div>
+    </div>
+
+    <div style="margin-bottom:18px">
+      <div class="field-label">How often</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="mode-opt selected" data-sched="days" onclick="pickWizardSchedule('days')" style="flex:1">Specific days</button>
+        <button class="mode-opt" data-sched="weekly" onclick="pickWizardSchedule('weekly')" style="flex:1">Times per week</button>
+      </div>
+      <div id="wizard-days-row" style="display:flex;gap:6px"></div>
+      <div id="wizard-weekly-row" class="hidden" style="display:flex;align-items:center;gap:10px">
+        <button onclick="stepWizardWeekly(-1)" style="width:36px;height:36px;border-radius:50%;border:1.5px solid var(--surface-soft);background:var(--surface)">−</button>
+        <span id="wizard-weekly-val" style="font-size:16px;font-weight:700">3</span>
+        <button onclick="stepWizardWeekly(1)" style="width:36px;height:36px;border-radius:50%;border:1.5px solid var(--surface-soft);background:var(--surface)">+</button>
+        <span style="font-size:13px;color:var(--ink-dim)">times a week</span>
+      </div>
+    </div>
+
+    <div style="margin-bottom:24px">
+      <div class="field-label">How many times before you'd call this a win? <span style="font-weight:400;color:var(--ink-faint)">— however long it takes</span></div>
+      <input type="number" id="wizard-consistency-input" value="12" style="width:100px;border-radius:12px;border:1.5px solid var(--surface-soft);padding:10px 12px;font-size:14px">
+    </div>
+
+    <button class="cta" id="wizard-next-btn" onclick="wizardNext()">Next</button>
   </div>
 
   <!-- SCREEN 4: SUGGEST SOMETHING NOT LISTED -->
@@ -209,7 +260,7 @@ function toggleTheme(){applyTheme(!document.body.classList.contains('dark'));}
 applyTheme(false);
 
 function showScreen(id){
-  ['screen-info','screen-dids','screen-suggest','screen-review','screen-sent'].forEach(s => {
+  ['screen-info','screen-dids','screen-config-wizard','screen-suggest','screen-review','screen-sent'].forEach(s => {
     document.getElementById(s).classList.toggle('hidden', s!==id);
   });
   window.scrollTo(0,0);
@@ -298,7 +349,8 @@ async function goToDids(){
   DID_CATALOG = rows.map(r => ({
     id:r.id, category:r.category, subCategory:r.sub_category||null,
     emoji: CATEGORY_EMOJI[r.category] || FALLBACK_EMOJI,
-    name:r.name, type:r.type, question:r.question
+    name:r.name, type:r.type, question:r.question,
+    unit:r.unit, minValue:r.min_value, maxValue:r.max_value, stepValue:r.step_value, choices:r.choices
   }));
   renderDidsList();
 }
@@ -332,11 +384,24 @@ function closeInfoModal(){ document.getElementById('info-modal').classList.add('
 
 function toggleDid(id){
   const row = document.querySelector(`.did-check-row[data-did="${id}"]`);
+  const isOn = row.classList.contains('selected');
+  if(!isOn && selectedDids.length >= 5){
+    // Hard cap — not just a soft nudge. Keeping this small isn't a technical
+    // limit, it's the same "build consistency on a few, swap in the next once
+    // one's done" philosophy the rest of the app already runs on.
+    document.getElementById('selection-count').textContent = "That's the max for now — 5 is plenty to start. You can always add more once you're going.";
+    document.getElementById('selection-count').style.color = 'var(--care)';
+    return;
+  }
   const on = row.classList.toggle('selected');
   if(on) selectedDids.push(id); else selectedDids = selectedDids.filter(d => d !== id);
-  document.getElementById('selection-count').textContent = selectedDids.length
-    ? `${selectedDids.length} selected`
-    : "Nothing picked yet — that's okay too, a trainer can help you choose";
+  const n = selectedDids.length;
+  const countEl = document.getElementById('selection-count');
+  countEl.style.color = '';
+  if(n === 0) countEl.textContent = "Nothing picked yet — that's okay too, a trainer can help you choose";
+  else if(n <= 3) countEl.textContent = `${n} selected — your trainer recommends starting with about 3`;
+  else if(n === 4) countEl.textContent = `${n} selected — that's already a lot to keep up daily, most people stick with 3`;
+  else countEl.textContent = `${n} selected — that's the max for now`;
 }
 
 // ─── Suggest something not listed — same real voice mechanism used elsewhere ──
@@ -397,6 +462,118 @@ function addSuggestionAndContinue(){
   showScreen('screen-dids');
 }
 
+// ─── Per-item config wizard — cycles through each picked item, one at a time ──
+let itemConfigs = {}; // keyed by item id: {goal, inputStyle, scheduleType, days, weeklyCount, consistencyDays}
+let wizardIndex = 0;
+const WIZARD_DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+function startConfigWizard(){
+  if(!selectedDids.length){ goToReview(); return; } // nothing picked — nothing to configure
+  wizardIndex = 0;
+  selectedDids.forEach(id => {
+    if(!itemConfigs[id]) itemConfigs[id] = {
+      goal: null, inputStyle: 'slider', scheduleType: 'days',
+      days: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], weeklyCount: 3, consistencyDays: 12
+    };
+  });
+  showScreen('screen-config-wizard');
+  renderWizardStep();
+}
+
+function renderWizardStep(){
+  const item = DID_CATALOG.find(d => d.id === selectedDids[wizardIndex]);
+  const cfg = itemConfigs[item.id];
+  document.getElementById('wizard-title').textContent = item.name;
+  document.getElementById('wizard-progress').textContent = `Item ${wizardIndex+1} of ${selectedDids.length} — set it up how you actually want to answer it each day`;
+
+  document.getElementById('wizard-goal-row').classList.toggle('hidden', item.type !== 'numeric');
+  document.getElementById('wizard-style-row').classList.toggle('hidden', item.type !== 'numeric');
+  if(item.type === 'numeric'){
+    document.getElementById('wizard-goal-input').value = cfg.goal ?? '';
+    document.getElementById('wizard-goal-unit').textContent = item.unit || '';
+    document.querySelectorAll('#wizard-style-row .mode-opt').forEach(b => b.classList.toggle('selected', b.dataset.style === cfg.inputStyle));
+  }
+
+  document.querySelectorAll('[data-sched]').forEach(b => b.classList.toggle('selected', b.dataset.sched === cfg.scheduleType));
+  document.getElementById('wizard-days-row').classList.toggle('hidden', cfg.scheduleType !== 'days');
+  document.getElementById('wizard-weekly-row').classList.toggle('hidden', cfg.scheduleType !== 'weekly');
+  document.getElementById('wizard-days-row').innerHTML = WIZARD_DOW.map(d => `
+    <button class="wizard-day-btn ${cfg.days.includes(d) ? 'selected' : ''}" onclick="toggleWizardDay('${d}')">${d[0]}</button>
+  `).join('');
+  document.getElementById('wizard-weekly-val').textContent = cfg.weeklyCount;
+
+  document.getElementById('wizard-consistency-input').value = cfg.consistencyDays;
+  document.getElementById('wizard-next-btn').textContent = wizardIndex === selectedDids.length - 1 ? 'Review' : 'Next';
+
+  updateWizardPreview();
+}
+
+function updateWizardPreview(){
+  const item = DID_CATALOG.find(d => d.id === selectedDids[wizardIndex]);
+  const cfg = itemConfigs[item.id];
+  const goalInput = document.getElementById('wizard-goal-input');
+  if(item.type === 'numeric' && goalInput.value.trim()) cfg.goal = parseInt(goalInput.value, 10);
+
+  const box = document.getElementById('wizard-preview');
+  const q = item.question || item.name;
+  if(item.type === 'yesno'){
+    box.innerHTML = `<div style="font-weight:600;margin-bottom:12px">${q}</div>
+      <div style="display:flex;gap:8px"><button class="mode-opt" style="flex:1" disabled>Yes</button><button class="mode-opt" style="flex:1" disabled>No</button></div>`;
+  } else if(item.type === 'choice'){
+    box.innerHTML = `<div style="font-weight:600;margin-bottom:12px">${q}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${(item.choices||[]).map(c => `<button class="mode-opt" disabled>${c}</button>`).join('')}</div>`;
+  } else if(item.type === 'reflection'){
+    box.innerHTML = `<div style="font-weight:600;margin-bottom:12px">${q}</div>
+      <div style="border:1.5px solid var(--surface-soft);border-radius:12px;padding:12px;color:var(--ink-faint);font-size:13px;background:var(--surface)">Type your answer here…</div>`;
+  } else {
+    const min = item.minValue ?? 0, max = item.maxValue ?? 100, step = item.stepValue ?? 1;
+    const val = cfg.goal ?? Math.round((min+max)/2);
+    box.innerHTML = `<div style="font-weight:600;margin-bottom:12px">${q}</div>
+      ${cfg.inputStyle === 'slider'
+        ? `<input type="range" min="${min}" max="${max}" step="${step}" value="${val}" style="width:100%" disabled>
+           <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-faint);margin-top:4px"><span>${min}${item.unit||''}</span><span>${max}${item.unit||''}</span></div>`
+        : `<div style="font-size:20px;font-weight:700">${val}${item.unit||''}</div>`}`;
+  }
+}
+
+function pickWizardStyle(style){
+  const item = DID_CATALOG.find(d => d.id === selectedDids[wizardIndex]);
+  itemConfigs[item.id].inputStyle = style;
+  document.querySelectorAll('#wizard-style-row .mode-opt').forEach(b => b.classList.toggle('selected', b.dataset.style === style));
+  updateWizardPreview();
+}
+function pickWizardSchedule(sched){
+  const item = DID_CATALOG.find(d => d.id === selectedDids[wizardIndex]);
+  itemConfigs[item.id].scheduleType = sched;
+  document.querySelectorAll('[data-sched]').forEach(b => b.classList.toggle('selected', b.dataset.sched === sched));
+  document.getElementById('wizard-days-row').classList.toggle('hidden', sched !== 'days');
+  document.getElementById('wizard-weekly-row').classList.toggle('hidden', sched !== 'weekly');
+}
+function toggleWizardDay(d){
+  const item = DID_CATALOG.find(d2 => d2.id === selectedDids[wizardIndex]);
+  const cfg = itemConfigs[item.id];
+  if(cfg.days.includes(d)) cfg.days = cfg.days.filter(x => x !== d); else cfg.days.push(d);
+  renderWizardStep();
+}
+function stepWizardWeekly(delta){
+  const item = DID_CATALOG.find(d => d.id === selectedDids[wizardIndex]);
+  const cfg = itemConfigs[item.id];
+  cfg.weeklyCount = Math.max(1, Math.min(7, cfg.weeklyCount + delta));
+  document.getElementById('wizard-weekly-val').textContent = cfg.weeklyCount;
+}
+function wizardNext(){
+  const item = DID_CATALOG.find(d => d.id === selectedDids[wizardIndex]);
+  const cfg = itemConfigs[item.id];
+  const consistencyVal = document.getElementById('wizard-consistency-input').value.trim();
+  cfg.consistencyDays = consistencyVal ? parseInt(consistencyVal, 10) : null;
+  if(wizardIndex < selectedDids.length - 1){ wizardIndex++; renderWizardStep(); }
+  else { goToReview(); }
+}
+function wizardBack(){
+  if(wizardIndex > 0){ wizardIndex--; renderWizardStep(); }
+  else { showScreen('screen-dids'); }
+}
+
 function goToReview(){
   document.getElementById('review-name').textContent = document.getElementById('signup-name').value.trim();
   document.getElementById('review-phone').textContent = document.getElementById('signup-phone').value.trim();
@@ -412,10 +589,22 @@ async function submitSignup(){
   const name = document.getElementById('signup-name').value.trim();
   const phone = document.getElementById('signup-phone').value.trim();
   const note = suggestionText ? `Also interested in (their own words): ${suggestionText}` : null;
+  const requestedItemConfig = selectedDids.length ? selectedDids.map(id => {
+    const item = DID_CATALOG.find(d => d.id === id);
+    const cfg = itemConfigs[id] || {};
+    return {
+      id, goal: cfg.goal ?? null, input_style: item.type === 'numeric' ? (cfg.inputStyle || 'slider') : null,
+      schedule_type: cfg.scheduleType || 'days',
+      days: cfg.scheduleType === 'days' ? (cfg.days || []) : null,
+      weekly_count: cfg.scheduleType === 'weekly' ? (cfg.weeklyCount || null) : null,
+      consistency_target_days: cfg.consistencyDays ?? null
+    };
+  }) : null;
 
   try {
     await sbReq('checkin_signups', { method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({
       name, phone, org_id: selectedOrgId, requested_item_ids: selectedDids.length ? selectedDids : null,
+      requested_item_config: requestedItemConfig,
       preferred_trainer_id: selectedTrainerId, note, status: 'pending'
     }) });
   } catch(e){
