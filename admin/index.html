@@ -982,6 +982,8 @@ async function openSignups(){
     : `<div style="font-size:13px;color:var(--ink-faint);padding:8px 2px">No new signups.</div>`;
 }
 
+let signupReviewConfigs = {}; // keyed by item id, editable copies of what the client chose
+
 function completeSignup(id){
   const s = signups.find(x => x.id === id);
   if(!s) return;
@@ -1003,10 +1005,87 @@ function completeSignup(id){
     trainerOpts.forEach(o => o.classList.remove('selected'));
   }
 
-  (s.requested_item_ids || []).forEach(didId => {
-    const row = document.querySelector(`.did-check-row[data-did="${didId}"]`);
-    if(row && !row.classList.contains('selected')){ row.classList.add('selected'); selectedDids.push(didId); }
-  });
+  if(s.requested_item_config && s.requested_item_config.length){
+    // The client already set these up in detail — show exactly what they chose,
+    // editable, rather than just checked boxes with hardcoded defaults underneath.
+    signupReviewConfigs = {};
+    s.requested_item_config.forEach(c => { signupReviewConfigs[c.id] = { ...c }; });
+    document.getElementById('new-client-dids-label').innerHTML =
+      `What ${s.name.split(' ')[0]} wants to track <span style="font-weight:400;color:var(--ink-faint)">— review and adjust before approving</span>`;
+    renderSignupReviewCards();
+  } else {
+    // Older signup, or one with no per-item detail (e.g. a free-text suggestion
+    // only) — fall back to the plain checkbox picker, same as before.
+    (s.requested_item_ids || []).forEach(didId => {
+      const row = document.querySelector(`.did-check-row[data-did="${didId}"]`);
+      if(row && !row.classList.contains('selected')){ row.classList.add('selected'); selectedDids.push(didId); }
+    });
+  }
+}
+
+function renderSignupReviewCards(){
+  const container = document.getElementById('new-client-dids');
+  const ids = Object.keys(signupReviewConfigs);
+  container.innerHTML = ids.map(id => {
+    const item = DID_CATALOG.find(d => d.id === id);
+    if(!item) return '';
+    const cfg = signupReviewConfigs[id];
+    const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    return `
+      <div class="field-block" style="border:1.5px solid var(--surface-soft);border-radius:14px;padding:14px" data-review-id="${id}">
+        <div style="font-weight:700;font-size:14px;margin-bottom:10px">${item.name}</div>
+        ${item.type === 'numeric' ? `
+          <div class="field-label">Target</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <input type="number" value="${cfg.goal ?? ''}" style="width:90px;padding:9px 11px;border-radius:10px;border:1.5px solid var(--surface-soft);font-size:13.5px" onchange="updateReviewCfg('${id}','goal',this.value?parseInt(this.value,10):null)">
+            <span style="font-size:12.5px;color:var(--ink-dim)">${item.unit||''}</span>
+          </div>
+          <div class="field-label">How they'll answer it</div>
+          <div class="trainer-select" style="margin-bottom:12px">
+            <div class="trainer-opt ${cfg.input_style==='slider'?'selected':''}" onclick="pickReviewStyle('${id}','slider',this)">Slider</div>
+            <div class="trainer-opt ${cfg.input_style==='textbox'?'selected':''}" onclick="pickReviewStyle('${id}','textbox',this)">Type a number</div>
+          </div>` : ''}
+        <div class="field-label">How often</div>
+        <div class="trainer-select" style="margin-bottom:10px">
+          <div class="trainer-opt ${cfg.schedule_type==='days'?'selected':''}" onclick="pickReviewSchedule('${id}','days',this)">Specific days</div>
+          <div class="trainer-opt ${cfg.schedule_type==='weekly'?'selected':''}" onclick="pickReviewSchedule('${id}','weekly',this)">Times per week</div>
+        </div>
+        <div id="review-days-${id}" style="${cfg.schedule_type!=='days'?'display:none;':''}display:flex;gap:5px;margin-bottom:12px">
+          ${DOW.map(d => `<div class="trainer-opt ${(cfg.days||[]).includes(d)?'selected':''}" style="padding:8px 10px;font-size:11px" onclick="toggleReviewDay('${id}','${d}',this)">${d[0]}</div>`).join('')}
+        </div>
+        <div id="review-weekly-${id}" style="${cfg.schedule_type!=='weekly'?'display:none;':''}display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div onclick="stepReviewWeekly('${id}',-1)" style="width:30px;height:30px;border-radius:50%;border:1.5px solid var(--surface-soft);display:flex;align-items:center;justify-content:center;cursor:pointer">−</div>
+          <span id="review-weekly-val-${id}" style="font-weight:700">${cfg.weekly_count||3}</span>
+          <div onclick="stepReviewWeekly('${id}',1)" style="width:30px;height:30px;border-radius:50%;border:1.5px solid var(--surface-soft);display:flex;align-items:center;justify-content:center;cursor:pointer">+</div>
+          <span style="font-size:12.5px;color:var(--ink-dim)">times a week</span>
+        </div>
+        <div class="field-label">Times before this counts as a win</div>
+        <input type="number" value="${cfg.consistency_target_days ?? ''}" style="width:90px;padding:9px 11px;border-radius:10px;border:1.5px solid var(--surface-soft);font-size:13.5px" onchange="updateReviewCfg('${id}','consistency_target_days',this.value?parseInt(this.value,10):null)">
+      </div>`;
+  }).join('');
+}
+
+function updateReviewCfg(id, key, val){ signupReviewConfigs[id][key] = val; }
+function pickReviewStyle(id, style, el){
+  signupReviewConfigs[id].input_style = style;
+  el.parentElement.querySelectorAll('.trainer-opt').forEach(o => o.classList.toggle('selected', o === el));
+}
+function pickReviewSchedule(id, sched, el){
+  signupReviewConfigs[id].schedule_type = sched;
+  el.parentElement.querySelectorAll('.trainer-opt').forEach(o => o.classList.toggle('selected', o === el));
+  document.getElementById(`review-days-${id}`).style.display = sched === 'days' ? 'flex' : 'none';
+  document.getElementById(`review-weekly-${id}`).style.display = sched === 'weekly' ? 'flex' : 'none';
+}
+function toggleReviewDay(id, day, el){
+  const cfg = signupReviewConfigs[id];
+  cfg.days = cfg.days || [];
+  if(cfg.days.includes(day)) cfg.days = cfg.days.filter(d => d !== day); else cfg.days.push(day);
+  el.classList.toggle('selected');
+}
+function stepReviewWeekly(id, delta){
+  const cfg = signupReviewConfigs[id];
+  cfg.weekly_count = Math.max(1, Math.min(7, (cfg.weekly_count||3) + delta));
+  document.getElementById(`review-weekly-val-${id}`).textContent = cfg.weekly_count;
 }
 
 function requestCardHtml(r){
@@ -1149,8 +1228,8 @@ const CATEGORY_EMOJI = {
 };
 async function loadCatalog(){
   try {
-    const rows = await sbReq('checkin_library_items?select=id,org_id,category,name&archived_at=is.null&order=category');
-    DID_CATALOG = (rows||[]).map(r => ({id: r.id, orgId: r.org_id, category: r.category, emoji: CATEGORY_EMOJI[r.category]||'✨', name: r.name}));
+    const rows = await sbReq('checkin_library_items?select=id,org_id,category,name,type,unit,min_value,max_value,step_value,choices&archived_at=is.null&order=category');
+    DID_CATALOG = (rows||[]).map(r => ({id: r.id, orgId: r.org_id, category: r.category, emoji: CATEGORY_EMOJI[r.category]||'✨', name: r.name, type: r.type, unit: r.unit, minValue: r.min_value, maxValue: r.max_value, stepValue: r.step_value, choices: r.choices}));
   } catch(e){ DID_CATALOG = []; }
   try {
     const actionRows = await sbReq('checkin_actions?select=id,org_id,name,description&archived_at=is.null&order=name');
@@ -1256,6 +1335,7 @@ async function createNewDid(){
 
 function openAddClient(fromRoster){
   pendingSignup = null;
+  signupReviewConfigs = {};
   document.getElementById('trainer-field-block').classList.toggle('hidden', !!fromRoster);
   document.getElementById('trainer-locked-block').classList.toggle('hidden', !fromRoster);
   document.getElementById('add-client-back').onclick = () => showScreen(fromRoster ? 'screen-roster' : 'screen-master');
@@ -1338,7 +1418,21 @@ async function addClient(){
     return;
   }
 
-  if(selectedDids.length){
+  if(pendingSignup && pendingSignup.requested_item_config && pendingSignup.requested_item_config.length){
+    // Real, trainer-approved config from the review cards — not the generic
+    // "every day, no goal" default used for a routine manual add.
+    const assignmentRows = Object.values(signupReviewConfigs).map(cfg => ({
+      client_id: newClient.id, library_item_id: cfg.id,
+      goal: cfg.goal ?? null, input_style: cfg.input_style ?? null,
+      schedule_type: cfg.schedule_type || 'days',
+      days: cfg.schedule_type === 'days' ? (cfg.days || []) : null,
+      weekly_count: cfg.schedule_type === 'weekly' ? (cfg.weekly_count || null) : null,
+      consistency_target_days: cfg.consistency_target_days ?? null
+    }));
+    try {
+      await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(assignmentRows)});
+    } catch(e){ /* client itself was created fine — dids can be added by hand if this fails */ }
+  } else if(selectedDids.length){
     const assignmentRows = selectedDids.map(itemId => ({
       client_id: newClient.id, library_item_id: itemId,
       schedule_type: 'days', days: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
