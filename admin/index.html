@@ -677,7 +677,7 @@ async function loadRealData(){
   const [rawTrainers, rawOrgs, rawClients] = await Promise.all([
     sbReq('checkin_trainers?select=*&order=name'),
     sbReq('checkin_orgs?select=*&order=is_default.desc,name.asc'),
-    sbReq('checkin_clients?select=id,name,phone,org_id,trainer_id,token&order=name'),
+    sbReq('checkin_clients?select=id,name,phone,org_id,trainer_id,token,archived_at&order=name'),
   ]);
 
   // Separate, defensive fetch — this table is from the most recent migration, so this
@@ -705,7 +705,7 @@ async function loadRealData(){
     lastCheckin: dayDataList[i].days[6] === 'green' ? 'today' : 'stale',
     days: dayDataList[i].days, helpDays: dayDataList[i].helpDays,
     notes: dayDataList[i].notes, urgentNote: dayDataList[i].urgentNote,
-    archived: false
+    archived: !!c.archived_at
   }));
 }
 
