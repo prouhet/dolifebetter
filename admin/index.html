@@ -358,7 +358,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <div class="prefs-link" onclick="openPreferences()">
-        ⚙️ Your preferences — max <span id="prefs-summary-val">3</span> dids/day suggested
+        ⚙️ Options — <span id="prefs-summary-val">3</span>/day · Recap: <span id="prefs-summary-recap">Off</span>
       </div>
       <div id="roster-client-list"></div>
       <button class="add-btn" style="margin-top:16px" onclick="openAddClient(true)">＋ Add my client</button>
@@ -368,7 +368,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
     <!-- SCREEN: PREFERENCES -->
     <div id="screen-preferences" class="hidden draft-wrap">
       <div class="back-link" onclick="showScreen('screen-roster')">← Back to roster</div>
-      <div class="page-title" style="font-size:19px">Your preferences</div>
+      <div class="page-title" style="font-size:19px">Options</div>
       <div class="page-sub">Just yours — other trainers set their own.</div>
       <div class="prefs-block">
         <div class="config-label">Suggested max dids per day <span style="font-weight:400;color:var(--ink-faint)">— a soft guide when assigning, never a hard block</span></div>
@@ -908,6 +908,7 @@ function openRoster(trainerId, cameFromMaster){
   const roster = clients.filter(c => c.trainerId === trainerId && !c.archived);
   document.getElementById('roster-meta').textContent = t.email + ' · ' + roster.length + ' client' + (roster.length===1?'':'s');
   document.getElementById('prefs-summary-val').textContent = t.maxDidsPerDay;
+  document.getElementById('prefs-summary-recap').textContent = t.dailyRecapEnabled ? 'On' : 'Off';
   updateRequestsLink();
 
   const urgent = roster.filter(c => c.helpDays[6] && c.days[6] === 'green');
@@ -1158,6 +1159,7 @@ async function savePreferences(){
   t.maxDidsPerDay = pendingMaxDids;
   t.dailyRecapEnabled = pendingDailyRecap;
   document.getElementById('prefs-summary-val').textContent = pendingMaxDids;
+  document.getElementById('prefs-summary-recap').textContent = pendingDailyRecap ? 'On' : 'Off';
   showScreen('screen-roster');
   showToast('✓ Saved');
 }
