@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Did Today — Build Log & Roadmap</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#F6F8FA; --surface:#FFFFFF; --surface-soft:#EAF1F3;
+  --ink:#14202A; --ink-dim:#5B6B74; --ink-faint:#98A6AD;
+  --teal:#149CBD; --teal-deep:#0C7590; --teal-tint:rgba(20,156,189,0.10);
+  --amber:#C9932E; --amber-tint:rgba(201,147,46,0.12);
+  --care:#A85D68; --care-tint:rgba(168,93,104,0.10);
+  --green:#1A8A62; --green-tint:rgba(26,138,98,0.10);
+  --red:#C64545; --red-tint:rgba(198,69,69,0.10);
+  --shadow-sm:0 1px 2px rgba(20,32,42,0.05);
+}
+body.dark {
+  --bg:#0A1215; --surface:#121C20; --surface-soft:#192529;
+  --ink:#E8EEF0; --ink-dim:#8FA0A7; --ink-faint:#526167;
+  --teal:#35B7D4; --teal-deep:#1E93AF; --teal-tint:rgba(53,183,212,0.14);
+  --amber:#DDAE55; --amber-tint:rgba(221,174,85,0.14);
+  --care:#C4818C; --care-tint:rgba(196,129,140,0.14);
+  --green:#3FBE8E; --green-tint:rgba(63,190,142,0.14);
+  --red:#E0696E; --red-tint:rgba(224,105,110,0.14);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-height:100vh}
+.wrapper{max-width:640px;margin:0 auto;padding:24px 20px 80px}
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.header-title{font-size:19px;font-weight:700;letter-spacing:-.01em}
+.header-sub{font-size:13px;color:var(--ink-faint);margin-top:2px}
+.theme-btn{width:34px;height:34px;border-radius:50%;border:1px solid var(--surface-soft);background:var(--surface);cursor:pointer;font-size:14px}
+.note-box{background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:12px 14px;margin:20px 0;font-size:12.5px;color:var(--ink-dim);line-height:1.5;box-shadow:var(--shadow-sm)}
+
+.tabs{display:flex;gap:6px;background:var(--surface-soft);border-radius:10px;padding:3px;margin:20px 0}
+.tab{flex:1;text-align:center;padding:9px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--ink-dim);cursor:pointer}
+.tab.active{background:var(--surface);color:var(--ink);box-shadow:var(--shadow-sm)}
+
+.day-group{margin-bottom:26px}
+.day-label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:10px}
+.entry{background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:13px 15px;margin-bottom:8px;box-shadow:var(--shadow-sm)}
+.entry-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.tag{font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:2px 8px;border-radius:20px;flex-shrink:0}
+.tag.new{background:var(--teal-tint);color:var(--teal-deep)}
+.tag.fix{background:var(--amber-tint);color:var(--amber)}
+.tag.security{background:var(--red-tint);color:var(--red)}
+.tag.infra{background:var(--green-tint);color:var(--green)}
+.entry-title{font-size:14px;font-weight:600}
+.entry-detail{font-size:13px;color:var(--ink-dim);line-height:1.5}
+
+.road-section{margin-bottom:24px}
+.road-heading{font-size:14px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:7px}
+.road-item{background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:12px 15px;margin-bottom:8px;box-shadow:var(--shadow-sm)}
+.road-item-title{font-size:14px;font-weight:600;margin-bottom:3px}
+.road-item-detail{font-size:12.5px;color:var(--ink-dim);line-height:1.5}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="header">
+    <div>
+      <div class="header-title">Did Today — Build Log</div>
+      <div class="header-sub">Internal only · not linked from any client page</div>
+    </div>
+    <button class="theme-btn" onclick="document.body.classList.toggle('dark')">🌙</button>
+  </div>
+
+  <div class="note-box">This tracks what's actually shipped and what's real vs. still mocked, across <code>dolifebetter.fit</code> and its admin tools. Update it the same way as any other file — edit in place on GitHub, or ask Claude to add an entry after a change.</div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('log')">Build Log</div>
+    <div class="tab" onclick="showTab('road')">Roadmap</div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- BUILD LOG — newest first. Add new day-groups at the top.      -->
+  <!-- ============================================================ -->
+  <div id="tab-log">
+
+    <div class="day-group">
+      <div class="day-label">Aug 28, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Daily recap email</span></div><div class="entry-detail">Brand new <code>daily-recap</code> function, Mon-Sat 4am, opt-in per trainer via the new "⚙️ Options" toggle on the roster screen. Covers a trainer's own roster only: no-consistency-goal-set flags, persistent specific-day misses (stays flagged until actually resolved, not just "today"), goals 3-or-fewer completions from done, recheck dates coming up, and Monday-only weekly-count shortfalls for the week that just closed. Everyone else gets a consistent roster line — check-in streak, goal progress, recheck date.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Weekly recap rebuilt as a celebration, not a status report</span></div><div class="entry-detail">Moved from Monday worst-first list to a Sunday highlight reel. Every client's whole week — both schedule types — scored as one fair completion percentage, converted to stars with real leniency at the top (90%+ still earns all 5; this is about accomplishment, not grading precision). Anyone below 60% simply isn't in the email at all — no sad stars mixed into a celebration.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Recheck reminders could fire after a goal was already met</span></div><div class="entry-detail">Caught while sharpening the config screen's copy to match: the new daily recap's recheck flag didn't check whether the consistency goal above it had already been hit, contradicting the original design. Fixed and redeployed — a recheck only fires if there's still something left to reassess.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Getting Started doc: philosophy, self-signup, and the "why" behind goals</span></div><div class="entry-detail">Added an upfront philosophy section (not a check-in tool, not a to-do list, why 3 dids or fewer works better), documented the self-signup flow trainers never had written down, and split the consistency-goal/recheck-date step into two clearly-reasoned points — now mirrored on the real <code>admin/plan.html</code> config screen too, not just the docs.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag infra">Infra</span><span class="entry-title">Edge functions now deploy directly, no CLI needed</span></div><div class="entry-detail"><code>daily_recap_enabled</code> column added to trainers; both recap functions deployed straight through the Supabase connector going forward, confirmed working end to end against real data before either went live.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Archived clients kept reappearing everywhere</span></div><div class="entry-detail">The archive button, its confirmation, and the database write all worked correctly — but the code that builds every client list had <code>archived: false</code> hardcoded for every single client, completely ignoring the real value. Every archived client, ever, kept showing up in the roster, client counts, and the all-clients list. Fixed at the source; confirmed the fix propagates to all six places that read this field.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 26, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Every save on any client's plan screen was silently failing</span></div><div class="entry-detail">Urgent, wide-reaching bug: a migration for the recheck-cadence field was never actually run, even though other migrations from the same batch were. Every single assignment save — any item, any client — had been failing with a database error since that UI shipped, because the save always tried writing to a column that didn't exist. Also recovered one real client's dropped assignment: the edit flow closes the old row before creating the replacement, so the very first failed save had silently left them with no active assignment for that did at all. Restored with the values that were clearly intended, then verified the fix against the exact case that had failed.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Signup notification emails never actually worked</span></div><div class="entry-detail">Chasing down a leaked test signup (an internal test's fallback request actually went through and emailed a real trainer) surfaced a deeper bug: the code that emails admins about a new signup never fetched or passed a trainer's login token in either branch — preference stated or not. Even a correctly-identified trainer's email was never going to link anywhere useful. Fixed both branches to fetch and pass real tokens.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 25, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Self-signup wizard with real per-item configuration</span></div><div class="entry-detail">Clients picking their own dids now configure each one in detail — goal, input style, schedule, and consistency target — with a live preview of the actual question exactly as it'll look on check-in day. Capped at 5 items with escalating guidance past 3, nudging toward focus over breadth. The trainer's "Complete Setup" screen now shows the client's real chosen configuration as editable cards to review and adjust, not a blank slate of hardcoded defaults — tested end to end on the live site itself, not just a sandbox copy.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Trainer Stats tab rebuilt, and a real regression caught mid-build</span></div><div class="entry-detail">The trainer-facing Stats tab now uses the same schedule-aware white/amber/green dot-row as the roster, with numeric and text answers tucked behind an expandable dropdown — fixing a real bug where a client with zero check-in history was shown as having "missed" days before anything was even assigned to them. Along the way, an in-progress redesign was accidentally built on a copy of the app that hadn't yet received an already-shipped fix, silently reverting it — caught, reapplied, and both changes verified to coexist correctly before shipping.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 21–22, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Premier U catalog rebuilt to match report rows exactly</span></div><div class="entry-detail">Overly broad groupings (one action holding 8 unrelated dids) split into precise, one-to-one matches against each row across all 5 real source documents — cross-referenced by hand, catching a wrong grouping guess (creatine and magnesium belonged with carb timing, not their own "recovery" action) and adding a real guidance field to actions themselves, so a trainer sees full context — brands, dosing — without drilling into individual items.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Consistency goals made unbounded, plus a separate recheck field</span></div><div class="entry-detail">A goal no longer resets or penalizes someone for a gap in activity — it now counts real completions since the assignment started, however long that takes, rather than a rolling window that could quietly punish a comeback. A completely separate "check back in after N days" field was added alongside it, for periodic re-evaluation regardless of whether the goal's been hit — since "did they succeed" and "has it been a while since anyone looked" turned out to be two different questions, not one.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Safe preview mode for trainers</span></div><div class="entry-detail">A trainer can now open a client's real check-in screen to see exactly what they'll experience, without creating real data. Genuinely safe, not just a hidden button — submission is blocked at the actual data-writing function every real check-in already funnels through, verified directly against the database after a full test run that nothing was written.</div></div>
+      <div class="entry"><div class="entry-detail">Also: MCP connectors evaluated for this project — Supabase declined for now (the manual SQL-review step has caught real problems more than once), GitHub recommended (tightly scoped, PR-based workflow) but not yet connected.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 20–21, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Actions: themed goals grouping several dids together</span></div><div class="entry-detail">Trainers can now assign a real, themed "action" (e.g. "Protein Intake Ramp") that groups several related dids into one pool, rather than assigning items one at a time. Includes a real accomplishment flow: a scheduled job detects when a consistency goal is met, surfacing a "⭐ Goal met" indicator to both the client and the trainer, with a genuine decision screen afterward — raise the target, or swap to something else already in the plan — that carries the goal's history forward rather than losing it.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">A pre-existing, wider-reaching display bug</span></div><div class="entry-detail">Found while building Actions, not caused by it: a misplaced closing tag meant the assigned-items list had never actually been hidden between screens for anyone, on any client, since long before this session — it just silently stayed visible behind whatever screen a trainer navigated to next. One stray tag, removed.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Roster misjudged days before a client's tracking began</span></div><div class="entry-detail">The day-status logic never checked when an assignment actually started, so any day-of-week match got marked "Missed" even for dates before a client existed on that schedule at all. A second, related bug in the same function silently skipped "every day" schedules entirely. Both fixed and verified against two clients with different schedules and start dates.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Add Client had zero org-filtering</span></div><div class="entry-detail">The catalog picker pulled every item from every org regardless of context, with no concept of Actions at all. Fixed alongside two other bugs caught in the same pass: a duplicate function name silently overwriting itself (breaking the roster's own copy-link button), and dids created inline from this screen not being scoped to the right org.</div></div>
+      <div class="entry"><div class="entry-detail">Also: trainer login links with copy buttons, and admin-triggered PIN reset, added to the roster.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 19, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Update/Stats tabs on a client's plan</span></div><div class="entry-detail">Trainers can now see what a client actually logged for each assigned did — real values, most recent five shown with an expand for more — not just whether they checked in that day.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Rest day, and a fully real client stats page</span></div><div class="entry-detail">Clients can mark a day as a rest day instead of answering every question, framed as "tomorrow's another day" rather than a miss — the motivational quote block is suppressed on rest days specifically, since a random quote could otherwise undercut that message. <code>client_stats_page.html</code> was rebuilt entirely from 100% mock "Jane" data into real Supabase queries — dot rows, streaks, goal math, and reflection text all pulled from a client's actual history.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Weekly recap email (original version)</span></div><div class="entry-detail">First scheduled digest for trainers — 7-day check-in counts per client, worst-attendance-first. (Later rewritten as a Sunday celebration format — see Aug 28.)</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Welcome screen showed every day instead of once</span></div><div class="entry-detail">It was tied to "have they checked in today," which is naturally empty every day before check-in — not "have they ever seen it." Fixed with a real per-device flag, same pattern as PIN verification.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 17, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag security">Security</span><span class="entry-title">Master roster screen was only hidden, not protected</span></div><div class="entry-detail">One line in a browser console — no exploit needed — landed any non-admin trainer on the full trainer/client list, delete buttons included. Worse, the underlying data was already sitting in the page's HTML for every signed-in trainer regardless, findable with plain "View Page Source." Fixed at the enforcement layer itself, and made sure the data simply isn't loaded into the page at all for non-admins, not just hidden.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">A new client's link was never actually shown to the trainer</span></div><div class="entry-detail">After adding a client, the app quietly generated a real link but only ever showed a generic "added" toast — no way to see or copy it anywhere. Added a real reveal screen with a working Copy Link button, plus a "🔗 Get their link" option on every client's plan page for finding it again later.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Change trainer, and library item archiving</span></div><div class="entry-detail">Moving a client between trainers is now its own real, org-scoped action — previously the only way was archiving their trainer's account entirely. Library items can now be archived with a real confirmation step, soft-delete throughout so client history is never lost; caught and fixed a related bug where the "assign an item" picker on a client's plan never respected the archive filter.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">The library's mic and "Interpret with Claude" were both entirely fake</span></div><div class="entry-detail">Neither ever recorded, transcribed, or called any real AI — the mic pasted back an identical hardcoded example regardless of input, and "Interpret" just waited on a timer before switching screens. Real transcription added in its place; the fake intermediate step was later removed outright once it was clear there was nothing real behind it.</div></div>
+      <div class="entry"><div class="entry-detail">Also: <code>dids.today</code> acquired and set up as a true mirror of the live app via a Cloudflare Worker, not a redirect.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 16, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag security">Security</span><span class="entry-title">Check-In Library had zero authentication</span></div><div class="entry-detail">Anyone who found the URL could freely add, edit, or delete the entire catalog — including Premier U's clinical content — no login required. Closed with the same gate used elsewhere. In the same pass: every client's item picker was pulling from every org's catalog regardless of context, leaking Premier U's taxonomy into Studio Strong clients' screens; fixed with real org-scoped write and visibility restrictions for non-admin trainers.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag security">Security</span><span class="entry-title">Full PIN system for clients and trainers</span></div><div class="entry-detail">Clients get a one-time device check using the last 4 digits of their own phone number, with a self-serve "change my PIN" option and a graceful "text your trainer" fallback after repeated wrong attempts — no email system, no separate password to lose. Trainers get their own first-time PIN setup, and the gate was extended to cover every admin page consistently after finding <code>plan.html</code> and <code>library.html</code> only checked token validity, not the PIN itself — a real bypass of the front door.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Multiple choice did type</span></div><div class="entry-detail">A genuine fourth answer type alongside yes/no, numeric, and text — real option lists, editable in the library, rendering as tappable buttons on a client's actual check-in. Converted a real did (Jeff's workout question) end to end as proof.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Real trainer email notifications</span></div><div class="entry-detail">A client flagging a tough day, or a new signup waiting to be completed, now actually emails the right trainer via Postmark — previously neither did anything beyond a passive banner nobody reliably saw. Building this surfaced that all five Studio Strong trainer emails in the database were placeholder addresses from early in the build, not real ones — replaced with everyone's actual email.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Timezone bug — evening check-ins landing on the wrong day</span></div><div class="entry-detail">A UTC-vs-local mismatch in three separate places meant a check-in anywhere from roughly 6pm to midnight Central could get filed under the next calendar day. Proven directly (a 9pm test check-in saved under the wrong date) and fixed everywhere it appeared: the client check-in itself, the admin day-grid, and goal-history dates.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Build log and onboarding doc, both created</span></div><div class="entry-detail">This changelog page and the first version of <code>admin/onboarding.html</code> — a real, screenshot-based walkthrough for non-technical trainers — didn't exist before today.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Multi-org trainer support</span></div><div class="entry-detail">Bryan and Keegan added as real Premier U trainers; the trainer-org relationship upgraded to a genuine many-to-many so Dave and Doreen can be tagged to both organizations at once, rather than being forced into just one.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 13, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag security">Security</span><span class="entry-title">One-time device verification</span></div><div class="entry-detail">First visit to a client's check-in link now asks for the last 4 digits of their phone before showing anything. Remembered per device after that — no daily friction, but a forwarded or glanced-at link alone isn't enough to see someone's real data anymore.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Signup trainer preference was silently missing</span></div><div class="entry-detail">Self-signup never actually had the "preferred trainer" field from the original design — every signup was silently defaulting to whichever trainer sorted first alphabetically when completed. Real field added, real "I don't know" default, admin side now forces a deliberate choice instead of a silent one.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Signups pipeline was fully disconnected</span></div><div class="entry-detail">The "new signups" banner and screen were still running on a permanently-empty placeholder — no real signup could ever have appeared to a trainer. Now reads real data end to end, tested by actually signing up as a real client and completing setup as Dave.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Voice input failures were silent</span></div><div class="entry-detail">If transcription came back empty, nothing told the client — looked identical to the mic doing nothing at all. Now shows "Didn't catch that — try again" across every mic on the site.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Empty text boxes could be submitted</span></div><div class="entry-detail">Send/Add buttons on all "tell your trainer" and "suggest something" screens now stay disabled until there's real text in the box.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">"Check In" showed on days with nothing due</span></div><div class="entry-detail">On a day with zero assigned dids, the app used to still show an active Check In button that created an empty, meaningless record. Now shows only a direct "need to talk to your trainer" option — no fake submit action.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 12, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Premier U's real catalog, org-scoped</span></div><div class="entry-detail">Schema now supports different orgs having entirely different did catalogs. 10 real items seeded from Premier U's actual metabolic health plan documents (Exercise, Sleep &amp; Circadian Rhythm, Hydration &amp; Electrolytes, Nutrition, Movement &amp; NEAT) — real guidance and recommendations, not placeholders. ~110 more items still needed once the full source material is available.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Check-In Library is fully real</span></div><div class="entry-detail"><code>admin/library.html</code> — real list, real edit (tap any item, change it, saves for real), real add. AI-assisted drafting ("Interpret with Claude") is still simulated, not a real API call.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag security">Security</span><span class="entry-title">Admin tool was showing everyone's data to anyone</span></div><div class="entry-detail">A dev-only fallback picker meant to make testing easier was reachable by anyone who visited the admin URL without a token — full access to every trainer's real roster, no login required. Closed entirely; invalid or missing token now shows only "Staff link required."</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Trainer identity was lost while navigating</span></div><div class="entry-detail">Clicking into a client's plan and back would drop the trainer's token from the URL, which — after the security fix above — meant getting locked out of your own tool mid-task. Identity now carries through every link.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Client plan editing</span></div><div class="entry-detail">Trainers can now actually edit an existing assigned did's goal or schedule from <code>admin/plan.html</code> — previously only adding new dids was possible. Editing correctly preserves goal history instead of overwriting it.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Aug 11, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag infra">Infra</span><span class="entry-title">HTTPS live on dolifebetter.fit</span></div><div class="entry-detail">Custom domain, DNS, and SSL certificate all confirmed working through GitHub Pages.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Admin roster, requests, and preferences — real</span></div><div class="entry-detail">Trainer login via real token, real client rosters with real day-grid check-in status, real pending-requests handling, real Add Trainer/Client/Org, real archive with the trainer-reassignment safeguard.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Voice transcription, for real</span></div><div class="entry-detail">Same Deepgram-backed mechanism as the internal brain-capture tool, using a separate key scoped only to transcription — safe to embed in public client pages.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Daily check-in and My Dids — real</span></div><div class="entry-detail"><code>index.html</code> and <code>client_manage_dids.html</code> both moved from static mockups to fully real, tested against Jeff's actual data.</div></div>
+    </div>
+
+    <div class="day-group">
+      <div class="day-label">Earlier</div>
+      <div class="entry"><div class="entry-detail">Full mockup phase — every screen designed and wireframed, Supabase schema built, GitHub Pages + GoDaddy DNS set up, first real client (Jeff Dodd) added directly via SQL before the admin tool could do it.</div></div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- ROADMAP — reorder freely as priorities shift.                 -->
+  <!-- ============================================================ -->
+  <div id="tab-road" class="hidden">
+
+    <div class="road-section">
+      <div class="road-heading">🔴 Known gaps, real risk</div>
+      <div class="road-item"><div class="road-item-title">No automatic welcome message for new clients</div><div class="road-item-detail">Confirmed by reading the real <code>addClient()</code> code: whether a client comes from a manual add or a completed self-signup, nothing automatic ever tells them their link or who their trainer is — the trainer has to manually copy and text it every time. No email address is even collected, only a phone number, so this needs a real SMS provider (e.g. Twilio) wired in — nothing sends a text anywhere in this project today. Scope agreed: a one-time welcome text, not the recurring reminder texts, which correctly stay manual.</div></div>
+      <div class="road-item"><div class="road-item-title">My Dids has no device verification</div><div class="road-item-detail">Same token-only exposure the check-in page had until Aug 13 — inherits "verified" for free if someone visits the check-in link first, but is wide open if it's the first link someone opens.</div></div>
+    </div>
+
+    <div class="road-section">
+      <div class="road-heading">⚪ Still fully mocked</div>
+      <div class="road-item"><div class="road-item-title">Client stats page ("How it's going")</div><div class="road-item-detail">Never connected to real data — shows the same fake history regardless of which real client opens it. Biggest remaining piece of static mockup left.</div></div>
+    </div>
+
+    <div class="road-section">
+      <div class="road-heading">🟡 Partially real</div>
+      <div class="road-item"><div class="road-item-title">Premier U catalog</div><div class="road-item-detail">10 of an estimated ~120 real items seeded. Needs the full source material from Dave, not guessed content.</div></div>
+      <div class="road-item"><div class="road-item-title">Check-In Library's AI drafting</div><div class="road-item-detail">"Interpret with Claude" still simulates a delay rather than actually calling an API.</div></div>
+      <div class="road-item"><div class="road-item-title">Did usage stats in admin</div><div class="road-item-detail">The original "which clients are tracking this, how's adherence looking" detail view was dropped when the library page went real. Editing works; the stats view doesn't exist yet.</div></div>
+    </div>
+
+    <div class="road-section">
+      <div class="road-heading">💭 Ideas, not started</div>
+      <div class="road-item"><div class="road-item-title">21-day check-in — light real-world testing</div><div class="road-item-detail">The trigger logic is real (fires on every 21st actual check-in), but has never been seen by a real client hitting day 21 naturally.</div></div>
+    </div>
+
+  </div>
+</div>
+<script>
+function showTab(t){
+  document.getElementById('tab-log').classList.toggle('hidden', t!=='log');
+  document.getElementById('tab-road').classList.toggle('hidden', t!=='road');
+  document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.textContent.toLowerCase().includes(t==='log'?'log':'road')));
+}
+</script>
+</body>
+</html>

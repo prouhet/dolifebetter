@@ -363,6 +363,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div id="roster-client-list"></div>
       <button class="add-btn" style="margin-top:16px" onclick="openAddClient(true)">＋ Add my client</button>
       <div class="admin-link hidden" id="roster-admin-link" onclick="showScreen('screen-master')">⚙️ Admin: View all trainers &amp; clients</div>
+      <div class="admin-link hidden" id="roster-changelog-link" onclick="goToChangelog()">📋 Build log &amp; roadmap</div>
     </div>
 
     <!-- SCREEN: PREFERENCES -->
@@ -905,6 +906,7 @@ function openRoster(trainerId, cameFromMaster){
   document.getElementById('roster-name').textContent = t.name;
   document.getElementById('roster-back').classList.toggle('hidden', !cameFromMaster);
   document.getElementById('roster-admin-link').classList.toggle('hidden', !!cameFromMaster || !t.isAdmin);
+  document.getElementById('roster-changelog-link').classList.toggle('hidden', !t.isAdmin);
   const roster = clients.filter(c => c.trainerId === trainerId && !c.archived);
   document.getElementById('roster-meta').textContent = t.email + ' · ' + roster.length + ' client' + (roster.length===1?'':'s');
   document.getElementById('prefs-summary-val').textContent = t.maxDidsPerDay;
@@ -983,6 +985,9 @@ function signupCardHtml(s){
 
 function goToLibrary(){
   window.location.href = `library.html?id=${CURRENT_TOKEN}`;
+}
+function goToChangelog(){
+  window.location.href = `changelog.html`;
 }
 async function openSignups(){
   document.getElementById('signups-list').innerHTML = `<div style="text-align:center;padding:30px;color:var(--ink-faint);font-size:13px">Loading…</div>`;
