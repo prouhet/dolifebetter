@@ -378,6 +378,15 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <div class="stepper-btn" onclick="stepMaxDids(1)">+</div>
         </div>
       </div>
+      <div class="prefs-block">
+        <div class="config-label">Daily recap email <span style="font-weight:400;color:var(--ink-faint)">— Mon-Sat mornings, action items for your own roster only</span></div>
+        <div id="daily-recap-toggle" onclick="toggleDailyRecap()" style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:12px;border:1.5px solid var(--surface-soft);cursor:pointer">
+          <span id="daily-recap-toggle-label" style="font-size:14px;font-weight:600">Off</span>
+          <span id="daily-recap-toggle-pill" style="width:44px;height:26px;border-radius:13px;background:var(--surface-soft);position:relative;flex-shrink:0;transition:background .15s">
+            <span id="daily-recap-toggle-dot" style="width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:var(--shadow-sm);position:absolute;top:3px;left:3px;transition:left .15s"></span>
+          </span>
+        </div>
+      </div>
       <button class="save-btn" onclick="savePreferences()">Save</button>
     </div>
 
@@ -694,7 +703,8 @@ async function loadRealData(){
 
   trainers = (rawTrainers||[]).map(t => ({
     id: t.id, name: t.name, email: t.email, isAdmin: t.is_admin, token: t.token,
-    maxDidsPerDay: t.max_dids_per_day, archived: !!t.archived_at, orgIds: trainerOrgsByTrainer[t.id] || [], pin: t.pin
+    maxDidsPerDay: t.max_dids_per_day, archived: !!t.archived_at, orgIds: trainerOrgsByTrainer[t.id] || [], pin: t.pin,
+    dailyRecapEnabled: !!t.daily_recap_enabled
   }));
   orgs = (rawOrgs||[]).map(o => ({ id: o.id, name: o.name, archived: !!o.archived_at, isDefault: o.is_default }));
 
@@ -1114,10 +1124,23 @@ function requestCardHtml(r){
 }
 
 let pendingMaxDids = 3;
+let pendingDailyRecap = false;
+
+function renderDailyRecapToggle(){
+  document.getElementById('daily-recap-toggle-label').textContent = pendingDailyRecap ? 'On' : 'Off';
+  document.getElementById('daily-recap-toggle-pill').style.background = pendingDailyRecap ? 'var(--teal)' : 'var(--surface-soft)';
+  document.getElementById('daily-recap-toggle-dot').style.left = pendingDailyRecap ? '21px' : '3px';
+}
+function toggleDailyRecap(){
+  pendingDailyRecap = !pendingDailyRecap;
+  renderDailyRecapToggle();
+}
 
 function openPreferences(){
   pendingMaxDids = trainerOf(currentTrainerId).maxDidsPerDay;
   document.getElementById('max-dids-val').textContent = pendingMaxDids;
+  pendingDailyRecap = trainerOf(currentTrainerId).dailyRecapEnabled;
+  renderDailyRecapToggle();
   showScreen('screen-preferences');
 }
 function stepMaxDids(delta){
@@ -1127,12 +1150,13 @@ function stepMaxDids(delta){
 async function savePreferences(){
   const t = trainerOf(currentTrainerId);
   try {
-    await sbReq(`checkin_trainers?id=eq.${t.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({max_dids_per_day: pendingMaxDids})});
+    await sbReq(`checkin_trainers?id=eq.${t.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({max_dids_per_day: pendingMaxDids, daily_recap_enabled: pendingDailyRecap})});
   } catch(e){
     showToast('✗ Could not save — try again');
     return;
   }
   t.maxDidsPerDay = pendingMaxDids;
+  t.dailyRecapEnabled = pendingDailyRecap;
   document.getElementById('prefs-summary-val').textContent = pendingMaxDids;
   showScreen('screen-roster');
   showToast('✓ Saved');
