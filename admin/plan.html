@@ -1260,7 +1260,11 @@ function stepWeekly(delta){
   document.getElementById('weekly-val').textContent = weeklyCount;
 }
 
+let isSavingAssignment = false; // guards against a double-tap creating two identical rows
+
 async function assignItem(){
+  if(isSavingAssignment) return; // already in flight — ignore a second tap before this one finishes
+  isSavingAssignment = true;
   const scheduleType = document.querySelector('#mode-toggle .mode-opt.selected').dataset.mode;
   const days = Array.from(document.querySelectorAll('.day-pick.on')).map(d => d.dataset.d);
   const goal = pendingItem.type === 'numeric' ? parseInt(document.getElementById('goal-input').value || '0', 10) : null;
@@ -1297,12 +1301,14 @@ async function assignItem(){
       await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
     }
   } catch(e){
+    isSavingAssignment = false;
     showToast('✗ Could not save — try again');
     return;
   }
   const wasEditing = !!editingAssignmentId;
   editingAssignmentId = null;
   pendingActionId = null;
+  isSavingAssignment = false;
   await init();
   showScreen('screen-plan');
   showToast(wasEditing ? `✓ ${pendingItem.name} — changes saved` : `✓ ${pendingItem.name} assigned to ${CLIENT.name.split(' ')[0]}`);
