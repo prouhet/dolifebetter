@@ -518,7 +518,7 @@ async function continueAfterVerify(){
 
   if(currentDailyId){
     await showConfirm(needsHelpChecked, existingDaily[0].needs_help_note);
-  } else if(!hasSeenWelcome()){
+  } else if(!PREVIEW_MODE && !hasSeenWelcome()){
     showScreen('screen-welcome');
   } else {
     showScreen('screen-poll');
