@@ -1176,11 +1176,18 @@ function openEditAssignment(assignmentId){
   ).length;
   renderConsistencyProgress();
   renderRecheckDate();
-  // Browsers sometimes restore a previously-typed value into a field slightly
-  // AFTER page JS finishes running (form restoration on reload/back-forward),
-  // and that restoration doesn't fire the input event these displays listen
-  // for — so re-check shortly after, independent of any event at all.
-  setTimeout(() => { renderConsistencyProgress(); renderRecheckDate(); }, 300);
+  // Browsers restore a previously-typed, unsaved value into a field on reload
+  // or back/forward navigation without firing the input event these displays
+  // listen for — and the timing of that restoration isn't guaranteed, so a
+  // single fixed delay can still miss it. Poll cheaply for a few seconds
+  // instead of guessing one magic delay.
+  let recheckPollCount = 0;
+  const recheckPoll = setInterval(() => {
+    renderConsistencyProgress();
+    renderRecheckDate();
+    recheckPollCount++;
+    if (recheckPollCount >= 20) clearInterval(recheckPoll); // ~3 seconds at 150ms, then stop
+  }, 150);
   populateConfigContext(pendingItem, pendingActionId);
   document.querySelectorAll('#input-style-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.style === (a.inputStyle||lastInputStyle)));
 
