@@ -480,14 +480,14 @@ function closeChangeTrainerModal(){
 
 function showClientLink(){
   document.getElementById('link-modal-name').textContent = `${CLIENT.name.split(' ')[0]}'s link`;
-  document.getElementById('link-modal-text').textContent = `https://dolifebetter.fit/?id=${CLIENT.token}`;
+  document.getElementById('link-modal-text').textContent = `https://dids.today/?id=${CLIENT.token}`;
   document.getElementById('link-modal-copy-btn').textContent = 'Copy Link';
   document.getElementById('link-modal').classList.remove('hidden');
 }
 function previewCheckin(){
   // preview=1 skips PIN entry (already authenticated as staff here) and
   // blocks real data from being written — see index.html's doSubmit().
-  window.open(`https://dolifebetter.fit/?id=${CLIENT.token}&preview=1`, '_blank');
+  window.open(`https://dids.today/?id=${CLIENT.token}&preview=1`, '_blank');
 }
 function closeClientLinkModal(){
   document.getElementById('link-modal').classList.add('hidden');

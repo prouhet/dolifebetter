@@ -583,7 +583,7 @@ const DOW_LABELS = (() => {
   return out;
 })();
 // Live at reelcall.app, not prouhet.github.io — the custom domain on that repo covers the whole site, not just ReelCall's own pages.
-const BASE_URL = 'https://dolifebetter.fit/';
+const BASE_URL = 'https://dids.today/';
 // ─── Real config — same pattern as index.html / client_manage_dids.html ────
 const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
@@ -1498,7 +1498,7 @@ async function addClient(){
   document.getElementById('new-client-phone').value = '';
   pendingClientLinkReturn = fromRoster ? 'roster' : 'master';
   document.getElementById('client-link-name').textContent = `${name.split(' ')[0]}'s link`;
-  document.getElementById('client-link-text').textContent = `https://dolifebetter.fit/?id=${newClient.token}`;
+  document.getElementById('client-link-text').textContent = `https://dids.today/?id=${newClient.token}`;
   document.getElementById('client-link-copy-btn').textContent = 'Copy Link';
   showScreen('screen-client-link');
   const parts = [];

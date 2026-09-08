@@ -68,7 +68,7 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
     <button class="theme-btn" onclick="document.body.classList.toggle('dark')">🌙</button>
   </div>
 
-  <div class="note-box">This tracks what's actually shipped and what's real vs. still mocked, across <code>dolifebetter.fit</code> and its admin tools. Update it the same way as any other file — edit in place on GitHub, or ask Claude to add an entry after a change.</div>
+  <div class="note-box">This tracks what's actually shipped and what's real vs. still mocked, across <code>dids.today</code> and its admin tools. Update it the same way as any other file — edit in place on GitHub, or ask Claude to add an entry after a change.</div>
 
   <div class="tabs">
     <div class="tab active" onclick="showTab('log')">Build Log</div>
@@ -79,6 +79,18 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
   <!-- BUILD LOG — newest first. Add new day-groups at the top.      -->
   <!-- ============================================================ -->
   <div id="tab-log">
+
+    <div class="day-group">
+      <div class="day-label">Sep 8, 2026</div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Consistency goal and recheck date shown live on the assignment screen</span></div><div class="entry-detail">Editing an existing did now shows "X of Y complete" and a real day/date countdown for its recheck ("Tuesday · in 7 days · Sep 15"), computed from actual logged history — not just whatever's saved. Both update live as the numbers are typed.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">A real timing bug in that same display</span></div><div class="entry-detail">Browsers can restore a previously-typed value into a field on reload without firing the event these displays listen for — a single fixed delay isn't reliable timing to catch that. Replaced with a short polling window instead of a guessed delay, verified directly against the exact failure case (a value arriving after the old check had already given up).</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">Consistency goal (12) and recheck cadence (21 days) are now real defaults</span></div><div class="entry-detail">Leaving either field blank on a brand-new assignment now actually saves these values, not just placeholder hint text that looked like a real number. Editing an existing assignment still saves blank as blank, so a goal can still be deliberately cleared. All 33 existing active assignments backfilled the same way — the 5 that already had real custom goals (Rebecca's at 24, others already at 12) were left untouched.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Overdue rechecks were silently disappearing from the daily recap</span></div><div class="entry-detail">The recheck section only checked the next 3 days, so anything that slipped past its date just vanished from the report for good instead of staying flagged. Now overdue rechecks stay flagged indefinitely, clearly marked "overdue since ..." rather than blending in with upcoming ones.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">A real duplicate-assignment bug, caught live</span></div><div class="entry-detail">A double-tap on "Assign" created two identical, simultaneously-active rows for the same did — surfaced by a client's check-in screen showing the same question twice. Traced to two database rows created 2.4 seconds apart. Fixed the one affected record directly and added a proper guard app-wide so a second tap while a save is already in flight gets ignored, not duplicated.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag new">New</span><span class="entry-title">"Save to your home screen" instructions on the daily check-in screen</span></div><div class="entry-detail">Collapsed by default, with real iPhone and Android steps. A "Turn off" option sits right next to it, and a matching toggle in My Dids brings it back — both read and write the same shared per-device setting.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag fix">Fix</span><span class="entry-title">Stale "Preview" badges removed from real, live pages</span></div><div class="entry-detail">Self-signup, My Dids, and the get-started landing page all still had a leftover "Preview" tag from early mockup development, even though every one of these pages has been fully real for a while. Removed from all three; left untouched on the genuine preview features (a trainer previewing a client's check-in, and the live item/question previews in the library and signup wizard), which are real and correctly named.</div></div>
+      <div class="entry"><div class="entry-top"><span class="tag infra">Infra</span><span class="entry-title">Marketing domain switched to dids.today</span></div><div class="entry-detail">Client links, the onboarding doc, and daily-recap's emails all point to dids.today now, to match the product's actual name. dolifebetter.fit keeps working underneath, unchanged — this was purely a which-one-we-lead-with decision, not a migration.</div></div>
+    </div>
 
     <div class="day-group">
       <div class="day-label">Aug 28, 2026</div>
