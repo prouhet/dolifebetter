@@ -378,18 +378,20 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div class="config-row">
           <div class="config-label">Consistency goal <span style="font-weight:400;color:var(--ink-faint)">— optional, real days proving it's a genuine habit, not a lucky streak</span></div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <input type="number" id="consistency-days-input" placeholder="12" style="width:64px;text-align:center">
+            <input type="number" id="consistency-days-input" placeholder="12" style="width:64px;text-align:center" oninput="renderConsistencyProgress()">
             <span style="font-size:13px;color:var(--ink-dim)">times, however long it takes</span>
           </div>
+          <div id="consistency-progress-display" class="hidden" style="margin-top:6px;font-size:13px;font-weight:600;color:var(--teal-deep)"></div>
         </div>
 
         <div class="config-row">
           <div class="config-label">Check back in <span style="font-weight:400;color:var(--ink-faint)">— optional, a checkpoint to decide together: keep going, adjust, or move on. Only fires if the goal above hasn't been hit yet</span></div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-size:13px;color:var(--ink-dim)">after</span>
-            <input type="number" id="review-after-input" placeholder="21" style="width:64px;text-align:center">
+            <input type="number" id="review-after-input" placeholder="21" style="width:64px;text-align:center" oninput="renderRecheckDate()">
             <span style="font-size:13px;color:var(--ink-dim)">days</span>
           </div>
+          <div id="recheck-date-display" class="hidden" style="margin-top:6px;font-size:13px;font-weight:600;color:var(--teal-deep)"></div>
         </div>
       </div>
 
@@ -1047,6 +1049,8 @@ async function createNewLibraryItem(){
 let weeklyCount = 3;
 let lastInputStyle = 'slider'; // remembers this trainer's last choice across assignments
 let editingAssignmentId = null; // set when editing an existing assignment, null when adding new
+let editingRealHits = 0; // real completions so far for the assignment being edited, computed once from RESPONSES
+let editingEffectiveFrom = null; // the being-edited assignment's real start date, for computing the recheck date live
 
 function goBackFromConfig(){
   // Editing an existing assignment never actually visited screen-pick on the way in —
@@ -1099,6 +1103,8 @@ function pickItem(id, actionId){
   document.getElementById('target-input').value = '';
   document.getElementById('consistency-days-input').value = '';
   document.getElementById('review-after-input').value = '';
+  document.getElementById('consistency-progress-display').classList.add('hidden');
+  document.getElementById('recheck-date-display').classList.add('hidden');
   populateConfigContext(pendingItem, pendingActionId);
   document.querySelectorAll('#input-style-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.style === lastInputStyle));
   document.querySelectorAll('#mode-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.mode === 'days'));
@@ -1109,6 +1115,32 @@ function pickItem(id, actionId){
   document.getElementById('weekly-val').textContent = weeklyCount;
   updateLoadWarning();
   showScreen('screen-config');
+}
+
+function renderConsistencyProgress(){
+  const el = document.getElementById('consistency-progress-display');
+  const targetRaw = document.getElementById('consistency-days-input').value.trim();
+  if(!editingAssignmentId || !targetRaw){ el.classList.add('hidden'); return; }
+  const target = parseInt(targetRaw, 10);
+  el.textContent = `${editingRealHits} of ${target} complete`;
+  el.classList.remove('hidden');
+}
+function renderRecheckDate(){
+  const el = document.getElementById('recheck-date-display');
+  const daysRaw = document.getElementById('review-after-input').value.trim();
+  if(!editingAssignmentId || !daysRaw || !editingEffectiveFrom){ el.classList.add('hidden'); return; }
+  const days = parseInt(daysRaw, 10);
+  const start = new Date(editingEffectiveFrom + 'T12:00:00');
+  const recheck = new Date(start);
+  recheck.setDate(recheck.getDate() + days);
+  const today = new Date(); today.setHours(12,0,0,0);
+  const msPerDay = 1000*60*60*24;
+  const daysUntil = Math.round((recheck - today) / msPerDay);
+  const dow = recheck.toLocaleDateString('en-US', {weekday:'long'});
+  const dateStr = fmtDate(localISO(recheck));
+  const untilStr = daysUntil > 0 ? `in ${daysUntil} day${daysUntil===1?'':'s'}` : daysUntil === 0 ? 'today' : `${Math.abs(daysUntil)} day${Math.abs(daysUntil)===1?'':'s'} ago`;
+  el.textContent = `${dow} · ${untilStr} · ${dateStr}`;
+  el.classList.remove('hidden');
 }
 
 function openEditAssignment(assignmentId){
@@ -1136,6 +1168,14 @@ function openEditAssignment(assignmentId){
   document.getElementById('target-input').value = a.goalLabel || '';
   document.getElementById('consistency-days-input').value = a.consistencyTargetDays ?? '';
   document.getElementById('review-after-input').value = a.reviewAfterDays ?? '';
+  editingEffectiveFrom = a.rawEffectiveFrom;
+  editingRealHits = RESPONSES.filter(r =>
+    r.library_item_id === a.libId &&
+    r.checkin_daily.checkin_date >= a.rawEffectiveFrom &&
+    r.value !== 'no' && r.value !== 'Rest day'
+  ).length;
+  renderConsistencyProgress();
+  renderRecheckDate();
   populateConfigContext(pendingItem, pendingActionId);
   document.querySelectorAll('#input-style-toggle .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.style === (a.inputStyle||lastInputStyle)));
 
