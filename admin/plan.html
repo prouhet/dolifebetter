@@ -1269,8 +1269,13 @@ async function assignItem(){
   if(inputStyle) lastInputStyle = inputStyle;
   const consistencyDaysRaw = document.getElementById('consistency-days-input').value.trim();
   const reviewAfterRaw = document.getElementById('review-after-input').value.trim();
-  const consistencyTargetDays = consistencyDaysRaw ? parseInt(consistencyDaysRaw, 10) : null;
-  const reviewAfterDays = reviewAfterRaw ? parseInt(reviewAfterRaw, 10) : null;
+  // A brand-new assignment left blank gets the same defaults the placeholder
+  // text suggests (12 times, recheck after 21 days) — matching what every
+  // existing assignment was just backfilled to. Editing an existing one stays
+  // null on blank, so a trainer can still deliberately clear a goal that's no
+  // longer needed without it silently reapplying.
+  const consistencyTargetDays = consistencyDaysRaw ? parseInt(consistencyDaysRaw, 10) : (editingAssignmentId ? null : 12);
+  const reviewAfterDays = reviewAfterRaw ? parseInt(reviewAfterRaw, 10) : (editingAssignmentId ? null : 21);
 
   const payload = {
     client_id: CLIENT.id, library_item_id: pendingItem.id, action_id: pendingActionId,
