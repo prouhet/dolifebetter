@@ -34,8 +34,6 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .screen{animation:enter .3s cubic-bezier(.16,1,.3,1) both}
 @keyframes enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
-.preview-tag{position:absolute;top:24px;right:20px;font-size:9.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
-  color:var(--ink-faint);background:var(--surface);border:1px solid var(--surface-soft);padding:4px 9px;border-radius:20px;opacity:.85;z-index:10}
 .theme-btn{position:absolute;top:66px;right:20px;width:34px;height:34px;border-radius:50%;border:1px solid var(--surface-soft);
   background:var(--surface);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;z-index:10}
 .theme-btn:active{transform:scale(.9)}
@@ -106,7 +104,6 @@ input::placeholder{color:var(--ink-faint)}
 </head>
 <body>
 <div class="wrapper">
-  <div class="preview-tag">Preview</div>
   <button class="theme-btn" id="theme-btn" onclick="toggleTheme()">🌙</button>
 
   <!-- SCREEN 1: INFO -->
