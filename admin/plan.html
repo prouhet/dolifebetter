@@ -418,6 +418,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
 
       <button class="save-btn" onclick="assignItem()"><span id="save-btn-label">Assign to Jane</span></button>
       <div class="cancel-link" onclick="showScreen('screen-plan')">Cancel</div>
+      <div id="archive-did-row" class="hidden" style="text-align:center;font-size:12.5px;color:var(--care);cursor:pointer;padding-top:14px" onclick="archiveDid()">Archive this did — they're done with it</div>
     </div>
 
   </div>
@@ -942,6 +943,21 @@ async function removeAction(clientActionId){
   showToast(liveCount > 0 ? `✓ Action removed — ${liveCount} active did${liveCount===1?'':'s'} still running` : '✓ Action removed');
 }
 
+async function archiveDid(){
+  const a = assigned.find(x => x.assignmentId === editingAssignmentId);
+  if(!a) return;
+  const today = localISO(new Date());
+  try {
+    await sbReq(`checkin_assignments?id=eq.${editingAssignmentId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({effective_to: today})});
+  } catch(e){
+    showToast('✗ Could not archive — try again');
+    return;
+  }
+  await init();
+  showScreen('screen-plan');
+  showToast(`✓ ${a.name} archived — still visible in their history`);
+}
+
 function addDaysToDateStr(dateStr, days){
   const d = new Date(dateStr + 'T12:00:00');
   d.setDate(d.getDate() + days);
@@ -1298,6 +1314,7 @@ function pickItem(id, actionId){
   document.getElementById('save-btn-label').textContent = `Assign to ${first}`;
   document.getElementById('config-back-link').innerHTML = '← Back to library';
   document.getElementById('edit-in-library-row').classList.add('hidden');
+  document.getElementById('archive-did-row').classList.add('hidden');
   document.getElementById('input-style-name').textContent = first;
   document.getElementById('weekly-name').textContent = first;
   document.getElementById('goal-row').classList.toggle('hidden', pendingItem.type !== 'numeric');
@@ -1371,6 +1388,7 @@ function openEditAssignment(assignmentId){
   document.getElementById('save-btn-label').textContent = 'Save Changes';
   document.getElementById('config-back-link').innerHTML = `← Back to ${first}'s plan`;
   document.getElementById('edit-in-library-row').classList.toggle('hidden', !pendingItem);
+  document.getElementById('archive-did-row').classList.remove('hidden');
   document.getElementById('input-style-name').textContent = first;
   document.getElementById('weekly-name').textContent = first;
   document.getElementById('goal-row').classList.toggle('hidden', a.type !== 'numeric');
