@@ -124,6 +124,8 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
       </div>
     </div>
 
+    <div id="goal-wins-list"></div>
+
     <div id="stats-list"></div>
     <div id="stats-empty" class="empty-state hidden">Nothing being tracked right now — check with your trainer if that doesn't seem right.</div>
 
@@ -373,6 +375,17 @@ function renderStats(assignRows, responseRows){
   } else {
     winCard.classList.add('hidden');
   }
+
+  const goalWins = assignRows.filter(a => a.goal_met_at);
+  document.getElementById('goal-wins-list').innerHTML = goalWins.map(a => `
+    <div class="win-card">
+      <div class="win-icon">⭐</div>
+      <div>
+        <div class="win-title">${escapeHtml(a.checkin_library_items.name)} — goal complete!</div>
+        <div class="win-sub">Completed ${a.consistency_target_days} times. Real progress, not luck.</div>
+      </div>
+    </div>
+  `).join('');
 }
 
 init();
