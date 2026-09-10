@@ -129,6 +129,11 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
     <div id="stats-list"></div>
     <div id="stats-empty" class="empty-state hidden">Nothing being tracked right now — check with your trainer if that doesn't seem right.</div>
 
+    <div id="archived-section" class="hidden">
+      <div class="cat-header">No longer tracking</div>
+      <div id="archived-list"></div>
+    </div>
+
     <a class="manage-link" id="manage-link" href="client_manage_dids.html">⚙️ Manage what I'm tracking</a>
 
   <div class="brand-footer">
@@ -250,17 +255,25 @@ async function continueAfterVerify(){
   const since = new Date(); since.setDate(since.getDate() - 13);
   const sinceISO = localISO(since);
 
-  let assignRows = [], responseRows = [];
+  let assignRows = [], responseRows = [], archivedRows = [], archivedResponseRows = [];
   try {
     const results = await Promise.all([
       sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT.id}&effective_to=is.null`),
-      sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT.id}&checkin_daily.checkin_date=gte.${sinceISO}`)
+      sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT.id}&checkin_daily.checkin_date=gte.${sinceISO}`),
+      sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT.id}&effective_to=not.is.null&order=effective_to.desc`)
     ]);
     assignRows = results[0] || [];
     responseRows = results[1] || [];
+    archivedRows = results[2] || [];
+    if(archivedRows.length){
+      // Archived items can be older than the 14-day window above, so their
+      // real completion counts need their own, unbounded-by-date fetch.
+      archivedResponseRows = await sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT.id}`);
+    }
   } catch(e){ /* render with whatever loaded, worst case an empty state */ }
 
   renderStats(assignRows, responseRows);
+  renderArchivedItems(archivedRows, archivedResponseRows);
   showScreen('screen-stats');
 }
 
@@ -274,6 +287,27 @@ function dotRowHtml(states){
 function goalMetBadge(a){
   if(!a.goal_met_at) return '';
   return ` <span style="display:inline-flex;align-items:center;gap:3px;font-size:11.5px;font-weight:600;color:var(--teal-deep);background:var(--teal-tint);padding:2px 8px;border-radius:100px;vertical-align:middle">⭐ Goal met</span>`;
+}
+
+function renderArchivedItems(archivedRows, responseRows){
+  const section = document.getElementById('archived-section');
+  const list = document.getElementById('archived-list');
+  if(!archivedRows.length){ section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+  list.innerHTML = archivedRows.map(a => {
+    const item = a.checkin_library_items;
+    const hits = responseRows.filter(r =>
+      r.checkin_daily && r.library_item_id === item.id &&
+      r.checkin_daily.checkin_date >= a.effective_from && r.checkin_daily.checkin_date <= a.effective_to &&
+      r.value !== 'no' && r.value !== 'Rest day'
+    ).length;
+    const goalPart = a.consistency_target_days ? ` — ${hits} of ${a.consistency_target_days}` : ` — ${hits} real day${hits===1?'':'s'} logged`;
+    return `
+    <div class="stat-card" style="opacity:.75">
+      <div class="stat-name">${escapeHtml(item.name)}${goalPart}</div>
+      <div class="stat-line">${fmtDate(a.effective_from)} – ${fmtDate(a.effective_to)}</div>
+    </div>`;
+  }).join('');
 }
 
 function renderStats(assignRows, responseRows){
