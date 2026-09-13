@@ -329,6 +329,10 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div id="tab-clients" class="hidden">
         <button class="add-btn" onclick="openAddClient(false)">＋ Add client</button>
         <div id="client-list-all"></div>
+        <div id="archived-clients-all-section" class="hidden" style="margin-top:20px">
+          <div class="section-label">Archived clients</div>
+          <div id="archived-clients-all-list"></div>
+        </div>
       </div>
 
       <div id="tab-orgs" class="hidden">
@@ -361,6 +365,10 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         ⚙️ Options — <span id="prefs-summary-val">3</span>/day · Recap: <span id="prefs-summary-recap">Off</span>
       </div>
       <div id="roster-client-list"></div>
+      <div id="archived-clients-roster-section" class="hidden" style="margin-top:20px">
+        <div class="section-label">Archived clients</div>
+        <div id="archived-clients-roster-list"></div>
+      </div>
       <button class="add-btn" style="margin-top:16px" onclick="openAddClient(true)">＋ Add my client</button>
       <div class="admin-link hidden" id="roster-admin-link" onclick="showScreen('screen-master')">⚙️ Admin: View all trainers &amp; clients</div>
       <div class="admin-link hidden" id="roster-changelog-link" onclick="goToChangelog()">📋 Build log &amp; roadmap</div>
@@ -809,10 +817,16 @@ function clientRowHtml(c){
           <span>${c.phone}</span>
         </a>
       </div>
-      <div class="status-pill ${c.lastCheckin === 'today' ? 'today' : 'stale'}">${c.lastCheckin === 'today' ? 'Checked in today' : c.lastCheckin}</div>
+      ${c.archived
+        ? `<div class="status-pill stale">Archived</div>
+      <div class="archive-btn" onclick="event.stopPropagation(); reactivateClient('${c.id}', '${c.name}')" title="Reactivate">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+      </div>`
+        : `<div class="status-pill ${c.lastCheckin === 'today' ? 'today' : 'stale'}">${c.lastCheckin === 'today' ? 'Checked in today' : c.lastCheckin}</div>
       <div class="archive-btn" onclick="event.stopPropagation(); startArchiveClient('${c.name}')" title="Archive">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
-      </div>
+      </div>`
+      }
     </div>`;
 }
 
@@ -897,6 +911,9 @@ function copyClientLink(name, token){
 
 function renderAllClients(){
   document.getElementById('client-list-all').innerHTML = clients.filter(c => !c.archived).map(clientRowHtml).join('');
+  const archived = clients.filter(c => c.archived);
+  document.getElementById('archived-clients-all-section').classList.toggle('hidden', archived.length === 0);
+  document.getElementById('archived-clients-all-list').innerHTML = archived.map(clientRowHtml).join('');
 }
 
 function openRoster(trainerId, cameFromMaster){
@@ -932,6 +949,9 @@ function openRoster(trainerId, cameFromMaster){
   html += rest.length ? rest.map(rosterRowHtml).join('') : `<div style="font-size:13px;color:var(--ink-faint);padding:8px 2px">No other clients.</div>`;
 
   document.getElementById('roster-client-list').innerHTML = html;
+  const archivedForTrainer = clients.filter(c => c.trainerId === trainerId && c.archived);
+  document.getElementById('archived-clients-roster-section').classList.toggle('hidden', archivedForTrainer.length === 0);
+  document.getElementById('archived-clients-roster-list').innerHTML = archivedForTrainer.map(clientRowHtml).join('');
   showScreen('screen-roster');
 }
 
@@ -1527,6 +1547,19 @@ function openArchiveModal(title, body, onConfirm){
 }
 function closeArchiveModal(){
   document.getElementById('archive-modal').classList.add('hidden');
+}
+
+async function reactivateClient(clientId, name){
+  try {
+    await sbReq(`checkin_clients?id=eq.${clientId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({archived_at: null})});
+  } catch(e){
+    showToast('✗ Could not reactivate — try again');
+    return;
+  }
+  await loadRealData();
+  renderTrainers(); renderAllClients();
+  if(!document.getElementById('screen-roster').classList.contains('hidden')) openRoster(currentTrainerId, false);
+  showToast(`✓ ${name.split(' ')[0]} reactivated`);
 }
 
 function startArchiveClient(name){

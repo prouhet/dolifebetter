@@ -150,6 +150,15 @@ input:focus{border-color:var(--teal)}
   display:flex;align-items:center;gap:8px;pointer-events:none;z-index:20;white-space:nowrap}
 body.dark .toast{background:#E8EEF0;color:#14202A}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.archive-modal-overlay{position:fixed;inset:0;background:rgba(10,18,21,.5);display:flex;align-items:flex-end;justify-content:center;z-index:40}
+.archive-modal-card{width:100%;max-width:440px;background:var(--surface);border-radius:20px 20px 0 0;padding:22px 20px 30px;box-shadow:var(--shadow-md)}
+.archive-modal-title{font-size:17px;font-weight:700;margin-bottom:8px}
+.archive-modal-body{font-size:13.5px;color:var(--ink-dim);line-height:1.55;margin-bottom:20px}
+.archive-modal-actions{display:flex;gap:10px}
+.archive-modal-btn{flex:1;padding:13px;border-radius:100px;border:1.5px solid var(--surface-soft);background:var(--bg);
+  color:var(--ink-dim);font-family:'DM Sans',sans-serif;font-size:13.5px;font-weight:600;cursor:pointer}
+.archive-modal-btn.danger{background:var(--care);border-color:var(--care);color:#fff}
 </style>
 </head>
 <body>
@@ -181,6 +190,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="showClientLink()">🔗 Get their link</div>
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="previewCheckin()">👀 Preview their check-in</div>
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="openChangeTrainer()">↔️ Change trainer</div>
+        <div style="font-size:13px;font-weight:600;color:var(--care);cursor:pointer" onclick="startArchiveClient()">🗄️ Archive this client</div>
       </div>
 
       <div id="link-modal" class="hidden" style="position:fixed;inset:0;background:rgba(20,32,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px" onclick="if(event.target===this)closeClientLinkModal()">
@@ -219,6 +229,12 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div id="dids-section">
           <div class="section-label" style="margin-top:0">Assigned dids</div>
           <div id="assigned-list"></div>
+          <div id="assigned-empty" class="hidden" style="font-size:13px;color:var(--ink-faint);padding:8px 0 4px">Nothing currently assigned.</div>
+
+          <div id="archived-dids-section" class="hidden" style="margin-top:20px">
+            <div class="section-label">Archived</div>
+            <div id="archived-dids-list"></div>
+          </div>
 
           <button class="add-btn" onclick="openPicker()">＋ Assign an item</button>
         </div>
@@ -424,6 +440,17 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
   </div>
 </div>
 
+<div class="archive-modal-overlay hidden" id="archive-modal" onclick="if(event.target===this) closeArchiveModal()">
+  <div class="archive-modal-card">
+    <div class="archive-modal-title" id="archive-modal-title">Archive this?</div>
+    <div class="archive-modal-body" id="archive-modal-body"></div>
+    <div class="archive-modal-actions">
+      <div class="archive-modal-btn" onclick="closeArchiveModal()">Cancel</div>
+      <div class="archive-modal-btn danger" id="archive-modal-confirm">Archive</div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast">✓ Assigned</div>
 
 <script>
@@ -546,6 +573,7 @@ let LIBRARY = [];
 let orgIdByKey = {}; // 'strong'/'premier' -> real org id, for the create-new-item form
 let myOrgIds = [];    // the currently signed-in trainer's real org affiliations
 let assigned = [];
+let archivedItems = []; // dids with no currently-open row — closed out with no replacement, kept for history
 let actions = [];        // this org's available actions, each with its item pool
 let clientActions = [];  // actions currently assigned to this client
 let pendingActionId = null; // set when picking an item from an action's pool, so the resulting assignment gets tagged
@@ -630,8 +658,9 @@ async function init(){
     if(!byItem[itemId]) byItem[itemId] = [];
     byItem[itemId].push(r);
   });
-  assigned = Object.values(byItem).map(rows => {
-    const current = rows.find(r => !r.effective_to) || rows[rows.length-1];
+  const allItems = Object.values(byItem).map(rows => {
+    const openRow = rows.find(r => !r.effective_to);
+    const current = openRow || rows[rows.length-1];
     const item = current.checkin_library_items;
     return {
       assignmentId: current.id, libId: item.id, name: item.name, type: item.type, unit: item.unit, actionId: current.action_id || null,
@@ -639,9 +668,13 @@ async function init(){
       goal: current.goal, goalLabel: current.goal_label, inputStyle: current.input_style,
       scheduleType: current.schedule_type, days: current.days||[], weeklyCount: current.weekly_count, rawEffectiveFrom: current.effective_from,
       lastReviewedAt: current.last_reviewed_at,
+      isActive: !!openRow, // the actual signal — a fallback-selected closed row must never be treated as live
+      archivedFrom: openRow ? null : current.effective_from, archivedTo: openRow ? null : current.effective_to,
       history: rows.map(r => ({goal: r.goal, from: fmtDate(r.effective_from), to: r.effective_to ? fmtDate(r.effective_to) : 'now'}))
     };
   });
+  assigned = allItems.filter(a => a.isActive);
+  archivedItems = allItems.filter(a => !a.isActive);
 
   actions = actionRows || [];
 
@@ -775,6 +808,7 @@ function toggleActionPool(i){
 
 function renderAssigned(){
   const list = document.getElementById('assigned-list');
+  document.getElementById('assigned-empty').classList.toggle('hidden', assigned.length > 0);
   list.innerHTML = assigned.map((a, i) => {
     const detail = assignedItemDetail(a);
     const clickAction = (a.goalMetAt || isRecheckDue(a)) ? `openResolve('${a.assignmentId}')` : `openEditAssignment('${a.assignmentId}')`;
@@ -803,6 +837,24 @@ function renderAssigned(){
           `).join('')}
         </div>
       ` : ''}
+    </div>
+  `;
+  }).join('');
+
+  document.getElementById('archived-dids-section').classList.toggle('hidden', archivedItems.length === 0);
+  document.getElementById('archived-dids-list').innerHTML = archivedItems.map(a => {
+    const hits = a.consistencyTargetDays ? realHitsFor(a.libId, a.rawEffectiveFrom) : null;
+    const progressStr = hits !== null ? ` — ${hits} of ${a.consistencyTargetDays}` : '';
+    return `
+    <div class="assigned-card" style="opacity:.7">
+      <div class="assigned-name-row">
+        <div class="assigned-name-block">
+          <div class="type-badge ${a.type}">${typeIcon(a.type)}</div>
+          <div class="assigned-name">${a.name}${progressStr}</div>
+        </div>
+      </div>
+      <div class="freq-label">${fmtDate(a.archivedFrom)} – ${fmtDate(a.archivedTo)}</div>
+      <div style="font-size:12.5px;color:var(--teal-deep);font-weight:600;cursor:pointer;margin-top:6px" onclick="reactivateDid('${a.assignmentId}')">Reactivate</div>
     </div>
   `;
   }).join('');
@@ -941,6 +993,52 @@ async function removeAction(clientActionId){
   // Removing the action just closes out its grouping — any dids already live
   // from its pool keep running exactly as they were, on purpose.
   showToast(liveCount > 0 ? `✓ Action removed — ${liveCount} active did${liveCount===1?'':'s'} still running` : '✓ Action removed');
+}
+
+function openArchiveModal(title, body, onConfirm){
+  document.getElementById('archive-modal-title').textContent = title;
+  document.getElementById('archive-modal-body').textContent = body;
+  const confirmBtn = document.getElementById('archive-modal-confirm');
+  confirmBtn.onclick = async () => { closeArchiveModal(); await onConfirm(); };
+  document.getElementById('archive-modal').classList.remove('hidden');
+}
+function closeArchiveModal(){
+  document.getElementById('archive-modal').classList.add('hidden');
+}
+
+function startArchiveClient(){
+  openArchiveModal(
+    `Archive ${CLIENT.name}?`,
+    `They'll be hidden from active rosters and the client list, but every did they've ever logged stays exactly as it is.`,
+    async () => {
+      try {
+        await sbReq(`checkin_clients?id=eq.${CLIENT.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({archived_at: new Date().toISOString()})});
+      } catch(e){
+        showToast('✗ Could not archive — try again');
+        return;
+      }
+      window.location.href = 'index.html?id=' + TRAINER_TOKEN;
+    }
+  );
+}
+
+async function reactivateDid(assignmentId){
+  const a = archivedItems.find(x => x.assignmentId === assignmentId);
+  if(!a) return;
+  const today = localISO(new Date());
+  try {
+    await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({
+      client_id: CLIENT.id, library_item_id: a.libId, schedule_type: a.scheduleType, days: a.days, weekly_count: a.weeklyCount,
+      goal: a.goal, goal_label: a.goalLabel, input_style: a.inputStyle, action_id: a.actionId,
+      effective_from: today, consistency_target_days: a.consistencyTargetDays, review_after_days: a.reviewAfterDays
+    })});
+  } catch(e){
+    showToast('✗ Could not reactivate — try again');
+    return;
+  }
+  await init();
+  showScreen('screen-plan');
+  showToast(`✓ ${a.name} reactivated`);
 }
 
 async function archiveDid(){
