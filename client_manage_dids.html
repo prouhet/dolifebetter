@@ -148,6 +148,12 @@ textarea::placeholder{color:var(--ink-faint)}
     <div class="page-sub">What you're tracking right now. Tap anything to ask about changing it.</div>
     <div id="mine-list"></div>
     <button class="add-btn" onclick="showScreen('screen-categories')">＋ Want to track something new?</button>
+
+    <div id="mine-archived-section" class="hidden" style="margin-top:20px">
+      <div class="page-sub" style="margin-bottom:8px">No longer tracking</div>
+      <div id="mine-archived-list"></div>
+    </div>
+
     <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--ink-faint);text-decoration:underline;cursor:pointer" onclick="openChangePin()">Change my PIN</div>
     <div id="homescreen-tip-toggle" style="text-align:center;margin-top:10px;font-size:13px;color:var(--ink-faint);text-decoration:underline;cursor:pointer" onclick="toggleHomeScreenTip()"></div>
     <div class="brand-footer">
@@ -270,6 +276,7 @@ const CLIENT_TOKEN = params.get('id');
 let CLIENT = null;
 let TRAINER_NAME = "your trainer";
 let myDids = [];       // real active assignments, joined with library item info
+let myArchivedDids = []; // dids no longer active, kept visible so history isn't lost
 let fullCatalog = [];  // every checkin_library_items row, for the "available" browse
 
 function applyTheme(dark){document.body.classList.toggle('dark', dark); document.getElementById('theme-btn').textContent = dark ? '☀️' : '🌙';}
@@ -301,14 +308,17 @@ async function init(){
 }
 
 async function continueAfterVerify(){
-  const [assignments, catalog] = await Promise.all([
+  const [assignments, catalog, archivedRows] = await Promise.all([
     sbReq(`checkin_assignments?select=id,goal,goal_label,checkin_library_items(*)&client_id=eq.${CLIENT.id}&effective_to=is.null`),
-    sbReq(`checkin_library_items?select=*&order=category`)
+    sbReq(`checkin_library_items?select=*&order=category`),
+    sbReq(`checkin_assignments?select=id,library_item_id,effective_from,effective_to,consistency_target_days,checkin_library_items(name)&client_id=eq.${CLIENT.id}&effective_to=not.is.null&order=effective_to.desc`)
   ]);
   myDids = assignments || [];
   fullCatalog = catalog || [];
+  myArchivedDids = archivedRows || [];
 
   renderMine();
+  renderArchivedMine();
   renderHomeScreenTipLabel();
   showScreen('screen-mine');
 }
@@ -381,6 +391,27 @@ async function submitVerify(){
     document.getElementById('verify-btn').disabled = true;
     if(verifyFailCount >= 3) document.getElementById('verify-stuck').classList.remove('hidden');
   }
+}
+
+function fmtDateShort(iso){
+  if(!iso) return 'now';
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+}
+
+function renderArchivedMine(){
+  const section = document.getElementById('mine-archived-section');
+  const list = document.getElementById('mine-archived-list');
+  if(!myArchivedDids.length){ section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+  list.innerHTML = myArchivedDids.map(a => {
+    const item = a.checkin_library_items;
+    return `<div class="did-row" style="opacity:.7">
+      <div style="display:flex;align-items:center;gap:13px;flex:1;min-width:0">
+        <div class="did-body"><div class="did-name">${item.name}</div><div class="did-meta">${fmtDateShort(a.effective_from)} – ${fmtDateShort(a.effective_to)}</div></div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function renderMine(){
