@@ -278,6 +278,12 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         </div>
       </div>
 
+      <div class="picker-item" onclick="archiveDid(resolvingAssignmentId)">
+        <div class="picker-name" style="color:var(--care)">Archive this did
+          <div style="font-size:12.5px;font-weight:400;color:var(--ink-faint);margin-top:2px">They're done with it — no replacement, just closes it out.</div>
+        </div>
+      </div>
+
       <div style="margin-top:24px">
         <div class="section-label">Past rechecks &amp; goals for this did</div>
         <div id="resolve-history-list" style="font-size:13px;color:var(--ink-dim)"></div>
@@ -1041,12 +1047,13 @@ async function reactivateDid(assignmentId){
   showToast(`✓ ${a.name} reactivated`);
 }
 
-async function archiveDid(){
-  const a = assigned.find(x => x.assignmentId === editingAssignmentId);
+async function archiveDid(assignmentId){
+  const id = assignmentId || editingAssignmentId;
+  const a = assigned.find(x => x.assignmentId === id);
   if(!a) return;
   const today = localISO(new Date());
   try {
-    await sbReq(`checkin_assignments?id=eq.${editingAssignmentId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({effective_to: today})});
+    await sbReq(`checkin_assignments?id=eq.${id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({effective_to: today})});
   } catch(e){
     showToast('✗ Could not archive — try again');
     return;
