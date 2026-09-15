@@ -257,8 +257,9 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div style="font-size:12.5px;font-weight:400;color:var(--ink-faint);margin-top:2px" id="resolve-primary-desc"></div>
         <div id="resolve-primary-form" class="hidden" style="margin-top:12px" onclick="event.stopPropagation()">
           <div id="resolve-primary-input-row" style="display:flex;align-items:center;gap:8px;margin-bottom:10px"></div>
-          <textarea id="resolve-primary-note" placeholder="Optional note — e.g. what the client said" style="width:100%;min-height:50px;padding:8px 10px;border-radius:10px;border:1px solid var(--surface-soft);background:var(--bg);color:var(--ink);font-family:inherit;font-size:13px;resize:vertical"></textarea>
-          <button class="save-btn" style="margin-top:10px;padding:10px" onclick="confirmResolvePrimary()">Confirm</button>
+          <div id="resolve-primary-note-toggle" style="font-size:12.5px;color:var(--ink-faint);text-decoration:underline;cursor:pointer;margin-bottom:10px" onclick="event.stopPropagation(); toggleResolveNote('primary')">+ Add a note</div>
+          <textarea id="resolve-primary-note" class="hidden" placeholder="e.g. what the client said" style="width:100%;min-height:50px;padding:8px 10px;border-radius:10px;border:1px solid var(--surface-soft);background:var(--bg);color:var(--ink);font-family:inherit;font-size:13px;resize:vertical;margin-bottom:10px"></textarea>
+          <button class="save-btn" style="padding:10px" onclick="confirmResolvePrimary()">Confirm</button>
         </div>
       </div>
 
@@ -267,8 +268,9 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div style="font-size:12.5px;font-weight:400;color:var(--ink-faint);margin-top:2px" id="resolve-secondary-desc"></div>
         <div id="resolve-secondary-form" class="hidden" style="margin-top:12px" onclick="event.stopPropagation()">
           <div id="resolve-secondary-input-row" style="display:flex;align-items:center;gap:8px;margin-bottom:10px"></div>
-          <textarea id="resolve-secondary-note" placeholder="Optional note — e.g. what the client said" style="width:100%;min-height:50px;padding:8px 10px;border-radius:10px;border:1px solid var(--surface-soft);background:var(--bg);color:var(--ink);font-family:inherit;font-size:13px;resize:vertical"></textarea>
-          <button class="save-btn" style="margin-top:10px;padding:10px" onclick="confirmResolveSecondary()">Confirm</button>
+          <div id="resolve-secondary-note-toggle" style="font-size:12.5px;color:var(--ink-faint);text-decoration:underline;cursor:pointer;margin-bottom:10px" onclick="event.stopPropagation(); toggleResolveNote('secondary')">+ Add a note</div>
+          <textarea id="resolve-secondary-note" class="hidden" placeholder="e.g. what the client said" style="width:100%;min-height:50px;padding:8px 10px;border-radius:10px;border:1px solid var(--surface-soft);background:var(--bg);color:var(--ink);font-family:inherit;font-size:13px;resize:vertical;margin-bottom:10px"></textarea>
+          <button class="save-btn" style="padding:10px" onclick="confirmResolveSecondary()">Confirm</button>
         </div>
       </div>
 
@@ -1084,6 +1086,10 @@ function openResolve(assignmentId){
   document.getElementById('resolve-secondary-form').classList.add('hidden');
   document.getElementById('resolve-primary-note').value = '';
   document.getElementById('resolve-secondary-note').value = '';
+  document.getElementById('resolve-primary-note').classList.add('hidden');
+  document.getElementById('resolve-secondary-note').classList.add('hidden');
+  document.getElementById('resolve-primary-note-toggle').classList.remove('hidden');
+  document.getElementById('resolve-secondary-note-toggle').classList.remove('hidden');
 
   if(isGoalMet){
     document.getElementById('goal-resolve-heading').textContent = '⭐ Goal met';
@@ -1126,6 +1132,14 @@ function toggleResolveOption(which){
   const other = which === 'primary' ? 'secondary' : 'primary';
   document.getElementById(`resolve-${other}-form`).classList.add('hidden');
   document.getElementById(`resolve-${which}-form`).classList.toggle('hidden');
+}
+
+function toggleResolveNote(which){
+  const textarea = document.getElementById(`resolve-${which}-note`);
+  const toggle = document.getElementById(`resolve-${which}-note-toggle`);
+  const showing = textarea.classList.toggle('hidden') === false;
+  toggle.classList.toggle('hidden', showing);
+  if(showing) textarea.focus();
 }
 
 async function writeReviewLog(fields){
