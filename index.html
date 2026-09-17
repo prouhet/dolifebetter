@@ -169,6 +169,13 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
     <button class="cta" style="max-width:320px" onclick="dismissWelcome()">Let's go</button>
   </div>
 
+  <div id="screen-celebrate" class="screen hidden" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px 4px 40px">
+    <div style="font-size:64px;margin-bottom:20px">🎉</div>
+    <div style="font-size:20px;font-weight:600;letter-spacing:-.01em;line-height:1.45;max-width:300px;margin-bottom:14px">You did it!</div>
+    <div id="celebrate-detail" style="font-size:15px;color:var(--ink-dim);line-height:1.55;max-width:290px;margin-bottom:38px"></div>
+    <button class="cta" style="max-width:320px" onclick="dismissCelebration()">Keep going</button>
+  </div>
+
   <div id="screen-verify" class="screen hidden" style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:20px 4px 40px">
     <div class="greeting" id="verify-greeting"></div>
     <div class="subline">Your PIN is the last 4 digits of your phone number — unless you've changed it.</div>
@@ -206,11 +213,11 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
 
     <details class="home-screen-card" id="home-screen-card" style="margin-top:20px;background:var(--surface);border:1px solid var(--surface-soft);border-radius:16px;padding:14px 16px;text-align:left">
       <summary style="cursor:pointer;font-weight:600;font-size:14px;color:var(--ink);display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <span style="display:flex;align-items:center;gap:10px;min-width:0">
-          <span style="display:flex;align-items:center;gap:8px;flex-shrink:0"><span>📱</span><span>Save Did Today to Your Home Screen</span></span>
-          <span onclick="event.preventDefault();event.stopPropagation();dismissHomeScreenTip();" style="font-weight:400;font-size:12px;color:var(--ink-faint);text-decoration:underline;cursor:pointer;flex-shrink:0">Turn off</span>
+        <span style="display:flex;align-items:center;gap:8px"><span>📱</span><span>Save Did Today to Your Home Screen</span></span>
+        <span style="display:flex;align-items:center;gap:10px">
+          <span onclick="event.preventDefault();event.stopPropagation();dismissHomeScreenTip();" style="font-weight:400;font-size:12px;color:var(--ink-faint);text-decoration:underline;cursor:pointer">Turn off</span>
+          <span class="home-screen-chevron" style="color:var(--ink-faint);font-size:12px;transition:transform .2s">▾</span>
         </span>
-        <span class="home-screen-chevron" style="color:var(--ink-faint);font-size:12px;transition:transform .2s;flex-shrink:0">▾</span>
       </summary>
       <div style="margin-top:12px;font-size:13px;color:var(--ink-dim);line-height:1.6">
         <div style="color:var(--ink-faint);margin-bottom:10px">(so it feels like an app)</div>
@@ -387,7 +394,7 @@ function toggleTheme(){applyTheme(!document.body.classList.contains('dark'));}
 applyTheme(false);
 
 function showScreen(id){
-  ['screen-loading','screen-welcome','screen-verify','screen-poll','screen-support','screen-21day','screen-confirm','screen-error'].forEach(s=>{
+  ['screen-loading','screen-welcome','screen-celebrate','screen-verify','screen-poll','screen-support','screen-21day','screen-confirm','screen-error'].forEach(s=>{
     const el = document.getElementById(s);
     el.classList.toggle('hidden', s!==id);
     if(s===id && s!=='screen-loading'){ el.classList.remove('screen'); void el.offsetWidth; el.classList.add('screen'); }
@@ -405,6 +412,9 @@ let ANSWERS = {};
 let currentDailyId = null;
 let periodicChoice = null;
 let needsHelpChecked = false;
+let currentDailyNote = null; // today's tough-day note, if any — kept global so the post-celebration branch can reuse it
+let allAssignments = null; // every active assignment, unfiltered by today's schedule — needed to scan for uncelebrated goals regardless of what's due today
+let pendingCelebrationId = null; // the assignment currently being celebrated, so dismissCelebration() knows which one to mark done
 let isRestDay = false;
 
 const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -477,12 +487,13 @@ async function continueAfterVerify(){
   const trainerFirst = (CLIENT.checkin_trainers?.name || 'your trainer').split(' ')[0];
   document.querySelectorAll('#trainer-name-inline, #trainer-name-inline-2, #trainer-name-inline-nothing').forEach(el => el.textContent = trainerFirst);
 
-  let allAssignments;
+  allAssignments = null;
   try {
     allAssignments = await sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT.id}&effective_to=is.null`);
   } catch(e){ allAssignments = []; }
   const dow = todayDow();
   ASSIGNMENTS = (allAssignments||[]).filter(a => a.schedule_type === 'weekly' || (a.days||[]).includes(dow));
+  ASSIGNMENTS.sort((a, b) => (a.sort_order ?? 999999) - (b.sort_order ?? 999999));
 
   let existingDaily = [];
   try {
@@ -498,6 +509,7 @@ async function continueAfterVerify(){
   if(existingDaily && existingDaily.length){
     currentDailyId = existingDaily[0].id;
     needsHelpChecked = existingDaily[0].needs_help;
+    currentDailyNote = existingDaily[0].needs_help_note;
     periodicChoice = existingDaily[0].periodic_choice;
     isRestDay = !!existingDaily[0].is_rest_day;
     let existingResponses = [];
@@ -516,8 +528,44 @@ async function continueAfterVerify(){
   document.getElementById('confirm-stats-link').href = `client_stats_page.html?id=${CLIENT.token}`;
   renderPoll();
 
+  const uncelebrated = (allAssignments||[]).find(a => a.goal_met_at && !hasCelebratedGoal(a.id));
+  if(!PREVIEW_MODE && uncelebrated){
+    showCelebration(uncelebrated);
+  } else {
+    proceedPastCelebration();
+  }
+}
+
+function hasCelebratedGoal(assignmentId){
+  try { return localStorage.getItem(`goal_celebrated_${assignmentId}`) === 'true'; }
+  catch(e){ return true; } // localStorage disabled — default to skipping rather than showing repeatedly
+}
+function markGoalCelebrated(assignmentId){
+  try { localStorage.setItem(`goal_celebrated_${assignmentId}`, 'true'); } catch(e){}
+}
+
+function showCelebration(a){
+  pendingCelebrationId = a.id;
+  const itemName = a.checkin_library_items ? a.checkin_library_items.name : 'that goal';
+  document.getElementById('celebrate-detail').textContent = `${itemName} — completed ${a.consistency_target_days} times. That's a real habit now.`;
+  showScreen('screen-celebrate');
+}
+
+function dismissCelebration(){
+  if(pendingCelebrationId) markGoalCelebrated(pendingCelebrationId);
+  pendingCelebrationId = null;
+  // there could be more than one uncelebrated goal at once — check again before moving on
+  const next = (allAssignments||[]).find(a => a.goal_met_at && !hasCelebratedGoal(a.id));
+  if(next){
+    showCelebration(next);
+  } else {
+    proceedPastCelebration();
+  }
+}
+
+function proceedPastCelebration(){
   if(currentDailyId){
-    await showConfirm(needsHelpChecked, existingDaily[0].needs_help_note);
+    showConfirm(needsHelpChecked, currentDailyNote);
   } else if(!PREVIEW_MODE && !hasSeenWelcome()){
     showScreen('screen-welcome');
   } else {
@@ -661,7 +709,7 @@ function answerSlider(assignmentId, input, min, max, unit){
 function answerReflection(assignmentId, val){ ANSWERS[assignmentId] = val; checkSubmittable(); }
 
 function checkSubmittable(){
-  const allAnswered = ASSIGNMENTS.every(a => ANSWERS[a.id] !== undefined && ANSWERS[a.id] !== '' && ANSWERS[a.id] !== null);
+  const allAnswered = ASSIGNMENTS.every(a => a.is_optional || (ANSWERS[a.id] !== undefined && ANSWERS[a.id] !== '' && ANSWERS[a.id] !== null));
   document.getElementById('submit-btn').disabled = !allAnswered;
 }
 
@@ -751,12 +799,16 @@ async function doSubmit(note){
       await sbReq(`checkin_responses?checkin_daily_id=eq.${currentDailyId}`, {method:'DELETE'});
     }
     if(ASSIGNMENTS.length){
-      const responseRows = ASSIGNMENTS.map(a => ({
-        checkin_daily_id: currentDailyId,
-        library_item_id: a.checkin_library_items.id,
-        value: String(ANSWERS[a.id])
-      }));
-      await sbReq('checkin_responses', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(responseRows)});
+      const responseRows = ASSIGNMENTS
+        .filter(a => ANSWERS[a.id] !== undefined && ANSWERS[a.id] !== '' && ANSWERS[a.id] !== null)
+        .map(a => ({
+          checkin_daily_id: currentDailyId,
+          library_item_id: a.checkin_library_items.id,
+          value: String(ANSWERS[a.id])
+        }));
+      if(responseRows.length){
+        await sbReq('checkin_responses', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(responseRows)});
+      }
     }
   } catch(e){
     alert('Something went wrong saving your check-in — try again in a moment.');
