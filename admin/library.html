@@ -211,8 +211,6 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div class="page-sub">What clients can be accountable for. Assign these to a client with their own goal and days.</div>
       <div class="tabs" id="org-filter-tabs" style="margin-bottom:16px">
         <div class="tab active" data-org-filter="" onclick="setOrgFilter('')">All</div>
-        <div class="tab" data-org-filter="strong" onclick="setOrgFilter('strong')">Studio Strong</div>
-        <div class="tab" data-org-filter="premier" onclick="setOrgFilter('premier')">Premier U</div>
       </div>
 
       <button class="add-btn" onclick="openAddNewItem()">＋ Add new item</button>
@@ -236,8 +234,6 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <div class="field-label">Organization <span style="font-weight:400;color:var(--ink-faint)">— who this item is for</span></div>
           <div class="type-toggle" id="org-toggle">
             <div class="type-opt selected" data-org="">All orgs (shared)</div>
-            <div class="type-opt" data-org="strong">Studio Strong only</div>
-            <div class="type-opt" data-org="premier">Premier U only</div>
           </div>
         </div>
 
@@ -404,8 +400,8 @@ async function sbReq(path, opts = {}) {
 }
 
 let library = [];      // real checkin_library_items, fetched at init
-let orgLookup = {};    // real org id -> short label (Studio Strong / Premier U)
-let orgIdByKey = {};   // 'strong'/'premier' -> real org id, for the add/edit form
+let orgLookup = {};    // real org id -> name (Studio Strong / Premier U / any other)
+let orgs = [];         // every real, active org — the single source of truth for both org UI sections
 let myOrgIds = [];      // the currently signed-in trainer's real org affiliations
 
 async function loadLibrary(){
@@ -418,17 +414,27 @@ async function loadLibrary(){
   } catch(e){
     items = await sbReq('checkin_library_items?select=*&order=category');
   }
-  const orgs = await sbReq('checkin_orgs?select=id,name');
-  orgs.forEach(o => {
-    orgLookup[o.id] = o.name;
-    if(/premier/i.test(o.name)) orgIdByKey.premier = o.id;
-    else if(/studio strong/i.test(o.name)) orgIdByKey.strong = o.id;
-  });
+  orgs = await sbReq('checkin_orgs?select=id,name&archived_at=is.null&order=name');
+  orgs.forEach(o => { orgLookup[o.id] = o.name; });
+  buildOrgUI();
   library = (items||[]).map(r => ({
     id: r.id, category: r.category, subCategory: r.sub_category, orgId: r.org_id,
     name: r.name, type: r.type, unit: r.unit, min: r.min_value, max: r.max_value,
     question: r.question, guidance: r.guidance, recommendation: r.recommendation, choices: r.choices
   }));
+}
+
+function buildOrgUI(){
+  // Both the filter tabs and the add/edit org toggle are built from whatever orgs
+  // actually exist right now — adding a new org here is the only place that matters;
+  // neither of these lists needs touching again.
+  const filterTabs = document.getElementById('org-filter-tabs');
+  filterTabs.innerHTML = `<div class="tab active" data-org-filter="" onclick="setOrgFilter('')">All</div>` +
+    orgs.map(o => `<div class="tab" data-org-filter="${o.id}" onclick="setOrgFilter('${o.id}')">${o.name}</div>`).join('');
+
+  const orgToggle = document.getElementById('org-toggle');
+  orgToggle.innerHTML = `<div class="type-opt selected" data-org="">All orgs (shared)</div>` +
+    orgs.map(o => `<div class="type-opt" data-org="${o.id}">${o.name} only</div>`).join('');
 }
 
 function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : type === 'choice' ? '☰' : '#'; }
@@ -472,11 +478,11 @@ function ensureClientDays(item){
   item.clients.forEach(c => { if(!c._days) c._days = genDays(item.weekPattern, c.profile, item.type); });
 }
 
-let orgFilter = ''; // '' = all, 'strong' or 'premier' = that org's shared + org-specific items
+let orgFilter = ''; // '' = all, otherwise a real org id — that org's shared + org-specific items
 
-function setOrgFilter(key){
-  orgFilter = key;
-  document.querySelectorAll('#org-filter-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.orgFilter === key));
+function setOrgFilter(orgId){
+  orgFilter = orgId;
+  document.querySelectorAll('#org-filter-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.orgFilter === orgId));
   renderLibrary();
 }
 
@@ -492,8 +498,7 @@ function renderLibrary(){
     visible = library.filter(i => !i.orgId || i.orgId === myOrgId);
   } else {
     document.getElementById('org-filter-tabs').classList.remove('hidden');
-    const filterOrgId = orgFilter ? orgIdByKey[orgFilter] : null;
-    visible = orgFilter ? library.filter(i => i.orgId === filterOrgId) : library;
+    visible = orgFilter ? library.filter(i => i.orgId === orgFilter) : library;
   }
   const cats = [...new Set(visible.map(i => i.category))]; // real categories present, whatever this org's taxonomy is
   cats.forEach(cat => {
@@ -585,9 +590,9 @@ function openEditItem(id){
   document.getElementById('draft-note-callout').classList.add('hidden');
   document.getElementById('draft-stage').classList.remove('hidden');
 
-  const orgKey = item.orgId === orgIdByKey.premier ? 'premier' : item.orgId === orgIdByKey.strong ? 'strong' : '';
-  const restrictedOrgKey = applyOrgAccessRestriction();
-  const editingOutOfScope = restrictedOrgKey !== null && orgKey !== restrictedOrgKey;
+  const selectedOrgId = item.orgId || '';
+  const restrictedOrgId = applyOrgAccessRestriction();
+  const editingOutOfScope = restrictedOrgId !== null && selectedOrgId !== restrictedOrgId;
   if(editingOutOfScope){
     // This item belongs to an org this trainer isn't part of — they can still view and
     // edit its content, but reassigning its org is exactly the cross-org action being
@@ -595,8 +600,8 @@ function openEditItem(id){
     // toggle silently save a different org than the one they opened.
     document.querySelectorAll('#org-toggle .type-opt').forEach(o => { o.classList.remove('hidden'); o.style.pointerEvents = 'none'; o.style.opacity = '.5'; });
   }
-  document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === orgKey));
-  updateSubcategorySuggestions(orgKey);
+  document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === selectedOrgId));
+  updateSubcategorySuggestions(selectedOrgId);
   document.getElementById('draft-category').value = item.category || '';
   document.getElementById('draft-subcategory').value = item.subCategory || '';
   document.getElementById('draft-name').value = item.name || '';
@@ -714,12 +719,11 @@ document.getElementById('org-toggle').addEventListener('click', e => {
   updateSubcategorySuggestions(opt.dataset.org);
 });
 
-function updateSubcategorySuggestions(orgKey){
+function updateSubcategorySuggestions(orgId){
   // Scoped to whichever org is currently selected in the form — so editing a Studio
   // Strong item doesn't suggest Premier U's sub-categories (Protein, Foundations) and
   // vice versa. "All orgs" shows everything, since a shared item could reasonably use any.
-  const targetOrgId = orgKey ? orgIdByKey[orgKey] : null;
-  const relevant = orgKey ? library.filter(i => i.orgId === targetOrgId) : library;
+  const relevant = orgId ? library.filter(i => i.orgId === orgId) : library;
   const subCats = [...new Set(relevant.map(i => i.subCategory).filter(Boolean))];
   document.getElementById('subcategory-suggestions').innerHTML = subCats.map(s => `<option value="${s}">`).join('');
 }
@@ -735,12 +739,11 @@ function applyOrgAccessRestriction(){
     return null;
   }
   const myOrgId = myOrgIds[0];
-  const myKey = myOrgId === orgIdByKey.premier ? 'premier' : myOrgId === orgIdByKey.strong ? 'strong' : null;
   allOrgOpts.forEach(o => {
-    const allowed = o.dataset.org === myKey;
+    const allowed = o.dataset.org === myOrgId;
     o.classList.toggle('hidden', !allowed);
   });
-  return myKey;
+  return myOrgId;
 }
 
 async function archiveLibraryItem(){
@@ -765,9 +768,9 @@ function openAddNewItem(){
   document.getElementById('save-btn-label').textContent = 'Add to Library';
   document.getElementById('draft-note-callout').classList.add('hidden');
   document.getElementById('draft-stage').classList.remove('hidden');
-  const restrictedOrgKey = applyOrgAccessRestriction();
-  document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === (restrictedOrgKey || '')));
-  updateSubcategorySuggestions(restrictedOrgKey || '');
+  const restrictedOrgId = applyOrgAccessRestriction();
+  document.querySelectorAll('#org-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === (restrictedOrgId || '')));
+  updateSubcategorySuggestions(restrictedOrgId || '');
   document.getElementById('draft-category').value = '';
   document.getElementById('draft-subcategory').value = '';
   document.getElementById('draft-name').value = '';
@@ -787,7 +790,7 @@ function openAddNewItem(){
 
 async function saveItem(){
   const type = document.querySelector('#type-toggle .type-opt.selected').dataset.type;
-  const orgKey = document.querySelector('#org-toggle .type-opt.selected').dataset.org;
+  const selectedOrgId = document.querySelector('#org-toggle .type-opt.selected').dataset.org;
   const category = document.getElementById('draft-category').value.trim() || 'Uncategorized';
   const subCategory = document.getElementById('draft-subcategory').value.trim() || null;
   const name = document.getElementById('draft-name').value.trim();
@@ -802,7 +805,7 @@ async function saveItem(){
 
   const payload = {
     category, sub_category: subCategory, name, type,
-    org_id: orgKey ? orgIdByKey[orgKey] : null,
+    org_id: selectedOrgId || null,
     unit: type === 'numeric' ? (document.getElementById('draft-unit').value.trim() || null) : null,
     min_value: type === 'numeric' ? parseFloat(document.getElementById('draft-min').value || '0') : null,
     max_value: type === 'numeric' ? parseFloat(document.getElementById('draft-max').value || '100') : null,
