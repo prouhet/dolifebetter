@@ -194,7 +194,7 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
     <div id="poll-questions"></div>
 
     <div id="normal-day-actions">
-      <div class="q-block">
+      <div class="q-block" id="needs-help-block">
         <label class="checkbox-row">
           <input type="checkbox" class="checkbox-input" id="needs-help-check" onchange="onNeedsHelpToggle(this.checked)">
           <span class="checkbox-box"></span>
@@ -202,22 +202,25 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
         </label>
       </div>
       <button class="cta" id="submit-btn" onclick="handleSubmit()" disabled>Check In</button>
-      <div class="edit-link" style="text-align:center" onclick="submitRestDay()">Rest day — didn't get to anything today, and that's okay</div>
+      <div class="edit-link" id="rest-day-link" style="text-align:center" onclick="submitRestDay()">Rest day — didn't get to anything today, and that's okay</div>
+      <div class="edit-link hidden" id="backfill-cancel-link" style="text-align:center" onclick="cancelBackfill()">Cancel — go back to today</div>
+      <div class="edit-link backfill-prompt-link hidden" style="text-align:center" onclick="openBackfill()">Forgot to log yesterday?</div>
       <a class="stats-link" id="poll-stats-link" href="client_stats_page.html">See your stats →</a>
     </div>
 
     <div id="nothing-today-actions" class="hidden">
       <div class="edit-link" style="margin-top:4px;font-size:14px;color:var(--care)" onclick="promptTalkToTrainer()">Need to talk to <span id="trainer-name-inline-nothing">your trainer</span> today?</div>
+      <div class="edit-link backfill-prompt-link hidden" style="text-align:center" onclick="openBackfill()">Forgot to log yesterday?</div>
       <a class="stats-link" id="nothing-stats-link" href="client_stats_page.html">See your stats →</a>
     </div>
 
     <details class="home-screen-card" id="home-screen-card" style="margin-top:20px;background:var(--surface);border:1px solid var(--surface-soft);border-radius:16px;padding:14px 16px;text-align:left">
       <summary style="cursor:pointer;font-weight:600;font-size:14px;color:var(--ink);display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <span style="display:flex;align-items:center;gap:8px"><span>📱</span><span>Save Did Today to Your Home Screen</span></span>
-        <span style="display:flex;align-items:center;gap:10px">
-          <span onclick="event.preventDefault();event.stopPropagation();dismissHomeScreenTip();" style="font-weight:400;font-size:12px;color:var(--ink-faint);text-decoration:underline;cursor:pointer">Turn off</span>
-          <span class="home-screen-chevron" style="color:var(--ink-faint);font-size:12px;transition:transform .2s">▾</span>
+        <span style="display:flex;align-items:center;gap:10px;min-width:0">
+          <span style="display:flex;align-items:center;gap:8px;flex-shrink:0"><span>📱</span><span>Save Did Today to Your Home Screen</span></span>
+          <span onclick="event.preventDefault();event.stopPropagation();dismissHomeScreenTip();" style="font-weight:400;font-size:12px;color:var(--ink-faint);text-decoration:underline;cursor:pointer;flex-shrink:0">Turn off</span>
         </span>
+        <span class="home-screen-chevron" style="color:var(--ink-faint);font-size:12px;transition:transform .2s;flex-shrink:0">▾</span>
       </summary>
       <div style="margin-top:12px;font-size:13px;color:var(--ink-dim);line-height:1.6">
         <div style="color:var(--ink-faint);margin-bottom:10px">(so it feels like an app)</div>
@@ -415,6 +418,8 @@ let needsHelpChecked = false;
 let currentDailyNote = null; // today's tough-day note, if any — kept global so the post-celebration branch can reuse it
 let allAssignments = null; // every active assignment, unfiltered by today's schedule — needed to scan for uncelebrated goals regardless of what's due today
 let pendingCelebrationId = null; // the assignment currently being celebrated, so dismissCelebration() knows which one to mark done
+let YESTERDAY_ASSIGNMENTS = []; // what would have been due yesterday, for the "forgot to log" backfill flow
+let isBackfillMode = false; // true while ASSIGNMENTS/ANSWERS have been swapped to represent yesterday instead of today
 let isRestDay = false;
 
 const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -494,6 +499,21 @@ async function continueAfterVerify(){
   const dow = todayDow();
   ASSIGNMENTS = (allAssignments||[]).filter(a => a.schedule_type === 'weekly' || (a.days||[]).includes(dow));
   ASSIGNMENTS.sort((a, b) => (a.sort_order ?? 999999) - (b.sort_order ?? 999999));
+
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayISOStr = localISO(yesterday);
+  const yesterdayDow = DOW_SHORT[yesterday.getDay()];
+  YESTERDAY_ASSIGNMENTS = (allAssignments||[]).filter(a => a.schedule_type === 'weekly' || (a.days||[]).includes(yesterdayDow));
+  YESTERDAY_ASSIGNMENTS.sort((a, b) => (a.sort_order ?? 999999) - (b.sort_order ?? 999999));
+  let yesterdayAlreadyLogged = true;
+  if(YESTERDAY_ASSIGNMENTS.length){
+    try {
+      const priorDaily = await sbReq(`checkin_daily?select=id&client_id=eq.${CLIENT.id}&checkin_date=eq.${yesterdayISOStr}`);
+      yesterdayAlreadyLogged = !!(priorDaily && priorDaily.length);
+    } catch(e){ yesterdayAlreadyLogged = true; } // if this check fails, don't offer backfill rather than risk a broken flow
+  }
+  const showBackfillOption = YESTERDAY_ASSIGNMENTS.length > 0 && !yesterdayAlreadyLogged;
+  document.querySelectorAll('.backfill-prompt-link').forEach(el => el.classList.toggle('hidden', !showBackfillOption));
 
   let existingDaily = [];
   try {
@@ -736,6 +756,29 @@ function submitRestDay(){
     doSubmit(null);
   }
 }
+function openBackfill(){
+  isBackfillMode = true;
+  ASSIGNMENTS = YESTERDAY_ASSIGNMENTS;
+  ANSWERS = {};
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  document.getElementById('poll-greeting').textContent = `Logging for yesterday`;
+  document.getElementById('poll-subline').textContent = yesterday.toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric'});
+  document.getElementById('needs-help-block').classList.add('hidden');
+  document.getElementById('rest-day-link').classList.add('hidden');
+  document.querySelectorAll('.backfill-prompt-link').forEach(el => el.classList.add('hidden'));
+  document.getElementById('backfill-cancel-link').classList.remove('hidden');
+  document.getElementById('normal-day-actions').classList.remove('hidden');
+  document.getElementById('nothing-today-actions').classList.add('hidden');
+  renderPoll();
+  showScreen('screen-poll');
+}
+async function cancelBackfill(){
+  isBackfillMode = false;
+  document.getElementById('needs-help-block').classList.remove('hidden');
+  document.getElementById('rest-day-link').classList.remove('hidden');
+  document.getElementById('backfill-cancel-link').classList.add('hidden');
+  await continueAfterVerify();
+}
 function promptTalkToTrainer(){
   // Nothing was expected today, so there's no poll to submit — this is the
   // only real action available, and it goes straight to the same support
@@ -783,6 +826,37 @@ async function upsertDaily(payload){
 async function doSubmit(note){
   if(PREVIEW_MODE){
     await showConfirm(needsHelpChecked, note); // same confirmation a client would see, just nothing was actually written
+    return;
+  }
+  if(isBackfillMode){
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+    const dailyPayload = {
+      client_id: CLIENT.id,
+      checkin_date: localISO(yesterday),
+      needs_help: false,
+      needs_help_note: null,
+      is_rest_day: false,
+      is_backfilled: true
+    };
+    try {
+      const rows = await sbReq('checkin_daily', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify(dailyPayload)});
+      const backfillDailyId = rows[0].id;
+      const responseRows = YESTERDAY_ASSIGNMENTS
+        .filter(a => ANSWERS[a.id] !== undefined && ANSWERS[a.id] !== '' && ANSWERS[a.id] !== null)
+        .map(a => ({
+          checkin_daily_id: backfillDailyId,
+          library_item_id: a.checkin_library_items.id,
+          value: String(ANSWERS[a.id])
+        }));
+      if(responseRows.length){
+        await sbReq('checkin_responses', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(responseRows)});
+      }
+    } catch(e){
+      alert('Something went wrong saving yesterday\'s check-in — try again in a moment.');
+      return;
+    }
+    isBackfillMode = false;
+    await continueAfterVerify(); // fresh, correct state for today — safer than trying to manually restore it
     return;
   }
   const dailyPayload = {

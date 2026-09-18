@@ -259,7 +259,7 @@ async function continueAfterVerify(){
   try {
     const results = await Promise.all([
       sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT.id}&effective_to=is.null`),
-      sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT.id}&checkin_daily.checkin_date=gte.${sinceISO}`),
+      sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id,is_backfilled)&checkin_daily.client_id=eq.${CLIENT.id}&checkin_daily.checkin_date=gte.${sinceISO}`),
       sbReq(`checkin_assignments?select=*,checkin_library_items(*)&client_id=eq.${CLIENT.id}&effective_to=not.is.null&order=effective_to.desc`)
     ]);
     assignRows = results[0] || [];
@@ -277,10 +277,10 @@ async function continueAfterVerify(){
   showScreen('screen-stats');
 }
 
-function dotRowHtml(states){
-  return `<div class="dot-row">` + states.map(s => `
+function dotRowHtml(days){
+  return `<div class="dot-row">` + days.map(d => `
     <div class="dot-col">
-      <div class="dot ${s}"></div>
+      <div class="dot ${d.state}" title="${d.backfilled ? 'Logged later, for that day' : ''}" style="${d.backfilled ? 'box-shadow:0 0 0 2px var(--amber)' : ''}"></div>
     </div>`).join('') + `</div>`;
 }
 
@@ -343,17 +343,20 @@ function renderStats(assignRows, responseRows){
     }
 
     const byDate = {};
+    const backfilledDates = new Set();
     responseRows.forEach(r => {
       if(r.library_item_id === item.id) byDate[r.checkin_daily.checkin_date] = r.value;
+      if(r.checkin_daily.is_backfilled) backfilledDates.add(r.checkin_daily.checkin_date);
     });
     // Each day is one of: 'quiet' (nothing logged), 'rest' (marked a rest day),
     // 'no' (an active "no" on a yes/no item), or 'hit' (a real logged value).
     const days = dates.map(d => {
       const v = byDate[d];
-      if(v === undefined) return {state:'quiet', value:null};
-      if(v === 'Rest day') return {state:'rest', value:v};
-      if(item.type === 'yesno') return {state: v === 'yes' ? 'hit' : 'no', value:v};
-      return {state:'hit', value:v};
+      const backfilled = backfilledDates.has(d);
+      if(v === undefined) return {state:'quiet', value:null, backfilled};
+      if(v === 'Rest day') return {state:'rest', value:v, backfilled};
+      if(item.type === 'yesno') return {state: v === 'yes' ? 'hit' : 'no', value:v, backfilled};
+      return {state:'hit', value:v, backfilled};
     });
 
     if(item.type === 'yesno'){
@@ -366,7 +369,7 @@ function renderStats(assignRows, responseRows){
         <div class="stat-card">
           <div class="stat-name">${escapeHtml(item.name)}${a.goal_label ? ` <span style="color:var(--ink-faint);font-weight:500">· ${escapeHtml(a.goal_label)}</span>` : ''}${goalMetBadge(a)}</div>
           <div class="stat-line"><b>${count}</b> of the last 14 days${goalCount ? ` <span style="color:var(--ink-faint)">· goal ${goalCount} over 2 weeks</span>` : ''}</div>
-          ${dotRowHtml(days.map(d => d.state))}
+          ${dotRowHtml(days)}
         </div>`;
     } else if(item.type === 'numeric'){
       const logged = days.filter(d => d.state === 'hit' && !isNaN(parseFloat(d.value)));
@@ -376,7 +379,7 @@ function renderStats(assignRows, responseRows){
         <div class="stat-card">
           <div class="stat-name">${escapeHtml(item.name)}${goalMetBadge(a)}</div>
           <div class="stat-line">${avg!=null ? `Averaging <b>${avg}${unit}</b>${a.goal!=null ? ` toward your ${a.goal}${unit} goal` : ''}` : 'No numbers logged yet'}</div>
-          ${dotRowHtml(days.map(d => d.state))}
+          ${dotRowHtml(days)}
         </div>`;
     } else if(item.type === 'choice'){
       const loggedDays = days.filter(d => d.state === 'hit');
@@ -385,7 +388,7 @@ function renderStats(assignRows, responseRows){
         <div class="stat-card">
           <div class="stat-name">${escapeHtml(item.name)}${goalMetBadge(a)}</div>
           <div class="stat-line"><b>${loggedDays.length}</b> of the last 14 days${mostRecent ? ` <span style="color:var(--ink-faint)">· most recent: ${escapeHtml(mostRecent)}</span>` : ''}</div>
-          ${dotRowHtml(days.map(d => d.state))}
+          ${dotRowHtml(days)}
         </div>`;
     } else {
       const loggedDays = days.filter(d => d.state === 'hit');
@@ -394,7 +397,7 @@ function renderStats(assignRows, responseRows){
         <div class="stat-card">
           <div class="stat-name">${escapeHtml(item.name)}${goalMetBadge(a)}</div>
           <div class="stat-line">Shared <b>${loggedDays.length}</b> of the last 14 days</div>
-          ${dotRowHtml(days.map(d => d.state))}
+          ${dotRowHtml(days)}
           ${lastEntry ? `<div class="reflection-note">"${escapeHtml(lastEntry)}"</div>` : ''}
         </div>`;
     }
