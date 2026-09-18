@@ -649,7 +649,7 @@ async function init(){
       actionItemRows = await sbReq(`checkin_action_items?select=action_id,library_item_id,checkin_library_items(*)&order=display_order`);
     } catch(e){ actionRows = []; clientActionRows = []; actionItemRows = []; } // actions system just won't show — rest of the page still works
     try {
-      RESPONSES = await sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT_ID}&order=checkin_daily(checkin_date).desc`);
+      RESPONSES = await sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id,is_backfilled)&checkin_daily.client_id=eq.${CLIENT_ID}&order=checkin_daily(checkin_date).desc`);
     } catch(e){ RESPONSES = []; } // stats tab just shows empty rather than blocking the whole page
     try {
       const orgs = await sbReq('checkin_orgs?select=id,name');
@@ -938,9 +938,10 @@ function renderStatsTab(){
       const dow = DOW_SHORT[date.getDay()];
       const label = dateStr === localISO(today) ? 'Now' : date.toLocaleDateString('en-US', {weekday:'narrow'});
       let cls = 'neutral';
-      if(byDate[dateStr]) cls = 'green';
+      let backfilled = false;
+      if(byDate[dateStr]){ cls = 'green'; backfilled = !!byDate[dateStr].checkin_daily.is_backfilled; }
       else if(isItemExpectedOn(a, dateStr, dow)) cls = 'amber';
-      dotsHtml += `<div class="stat-dot-col"><div class="stat-dot-label">${label}</div><div class="stat-dot ${cls}" title="${fmtDate(dateStr)}"></div></div>`;
+      dotsHtml += `<div class="stat-dot-col"><div class="stat-dot-label">${label}</div><div class="stat-dot ${cls}" title="${fmtDate(dateStr)}${backfilled ? ' — logged later' : ''}" style="${backfilled ? 'box-shadow:0 0 0 2px var(--amber)' : ''}"></div></div>`;
     }
     const dotRow = `<div class="stat-dot-row">${dotsHtml}</div>`;
 
