@@ -664,10 +664,27 @@ async function computeClientDayData(client){
   }
 
   try {
-    dailyRows = await sbReq(`checkin_daily?select=checkin_date,needs_help,needs_help_note&client_id=eq.${client.id}&order=checkin_date.desc&limit=14`);
+    dailyRows = await sbReq(`checkin_daily?select=checkin_date,needs_help,needs_help_note,is_rest_day&client_id=eq.${client.id}&order=checkin_date.desc&limit=14`);
   } catch(e){}
   const byDate = {};
   (dailyRows||[]).forEach(r => { byDate[r.checkin_date] = r; });
+
+  // A checkin_daily row existing only means they opened the check-in that day —
+  // it says nothing about whether they actually completed anything. A client who
+  // answered "no" to every assigned did still gets a row, and without this check
+  // that day would incorrectly render as a green "accomplished" dot right along
+  // with a real, genuine completion. Rest days count as a real, intentional
+  // check-in — not a miss, but also not "green" in the same way, so they're
+  // tracked separately here even though today's fix folds them into the same
+  // accomplished bucket as a real hit (a rest day is a legitimate answer, not a
+  // gap in the record).
+  let realHitDates = new Set();
+  try {
+    const responseRows = await sbReq(`checkin_responses?select=value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${client.id}`);
+    (responseRows||[]).forEach(r => {
+      if(r.value !== 'no') realHitDates.add(r.checkin_daily.checkin_date);
+    });
+  } catch(e){}
 
   const days = [], helpDays = [], notes = {};
   const today = new Date();
@@ -677,7 +694,7 @@ async function computeClientDayData(client){
     const dateStr = localISO(d);
     const idx = 6-i;
     const rec = byDate[dateStr];
-    if(rec){
+    if(rec && realHitDates.has(dateStr)){
       days.push('green');
       if(rec.needs_help){ helpDays.push(true); notes[idx] = rec.needs_help_note || ''; }
       else helpDays.push(false);
