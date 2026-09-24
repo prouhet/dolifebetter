@@ -704,7 +704,11 @@ async function init(){
   // and stays correct automatically if that ever changes for either org.
   const orgUsesActions = actions.length > 0;
   document.getElementById('actions-section').classList.toggle('hidden', !orgUsesActions);
-  document.getElementById('dids-section').classList.toggle('hidden', orgUsesActions);
+  // Always available, even for an org built around Actions — a themed action
+  // covers what it covers, but a client can always want something that
+  // genuinely doesn't fit any existing one. Without this, there'd be no way
+  // to assign that at all short of building a whole new action for it.
+  document.getElementById('dids-section').classList.remove('hidden');
 
   // For each currently-assigned action, attach its full item pool, marking which
   // pool items are already live (found in `assigned`) vs. still available to add.
