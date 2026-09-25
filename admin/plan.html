@@ -193,6 +193,11 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div style="font-size:13px;font-weight:600;color:var(--care);cursor:pointer" onclick="startArchiveClient()">🗄️ Archive this client</div>
       </div>
 
+      <div id="admin-org-access" class="hidden" style="margin:-8px 0 20px;padding:14px 16px;background:var(--surface);border:1px solid var(--surface-soft);border-radius:14px">
+        <div style="font-size:12.5px;font-weight:600;color:var(--ink-faint);margin-bottom:8px">Additional organizations <span style="font-weight:400">— admin only. Gives this client's catalog access to another org's items too, on top of their own.</span></div>
+        <div id="admin-org-access-list"></div>
+      </div>
+
       <div id="link-modal" class="hidden" style="position:fixed;inset:0;background:rgba(20,32,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px" onclick="if(event.target===this)closeClientLinkModal()">
         <div style="background:var(--surface);border-radius:16px;padding:22px;max-width:320px;width:100%">
           <div style="font-size:16px;font-weight:700;margin-bottom:4px" id="link-modal-name"></div>
@@ -321,10 +326,8 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
       <div class="new-did-toggle" onclick="toggleNewItemForm()" id="new-item-toggle" style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer;margin-top:14px;display:inline-block">+ Create a new item</div>
       <div id="new-item-form" class="hidden" style="margin-top:12px;padding:16px;border-radius:14px;background:var(--surface);border:1px solid var(--surface-soft)">
         <div class="config-label">Organization</div>
-        <div class="mode-toggle" id="new-item-org" style="margin-bottom:14px;grid-template-columns:1fr 1fr 1fr">
+        <div class="mode-toggle" id="new-item-org" style="margin-bottom:14px">
           <div class="mode-opt" data-org="">All orgs</div>
-          <div class="mode-opt" data-org="strong">Studio Strong</div>
-          <div class="mode-opt" data-org="premier">Premier U</div>
         </div>
         <div class="config-label">Category</div>
         <input type="text" id="new-item-category" placeholder="e.g. Move, Exercise, Nutrition" style="width:100%;padding:11px 13px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);margin-bottom:14px;outline:none">
@@ -585,8 +588,10 @@ function isTrainerVerifiedOnThisDevice(token){
 }
 let CLIENT = null;
 let LIBRARY = [];
-let orgIdByKey = {}; // 'strong'/'premier' -> real org id, for the create-new-item form
 let myOrgIds = [];    // the currently signed-in trainer's real org affiliations
+let CURRENT_IS_ADMIN = false;
+let allOrgs = [];         // every real, active org — replaces the old hardcoded strong/premier pair
+let clientSecondaryOrgIds = []; // this client's additional org grants, admin-managed
 let assigned = [];
 let archivedItems = []; // dids with no currently-open row — closed out with no replacement, kept for history
 let actions = [];        // this org's available actions, each with its item pool
@@ -607,8 +612,9 @@ async function init(){
   }
 
   try {
-    const meRows = await sbReq(`checkin_trainers?select=id&token=eq.${TRAINER_TOKEN}`);
+    const meRows = await sbReq(`checkin_trainers?select=id,is_admin&token=eq.${TRAINER_TOKEN}`);
     const myTrainerId = meRows && meRows[0] ? meRows[0].id : null;
+    CURRENT_IS_ADMIN = !!(meRows && meRows[0] && meRows[0].is_admin);
     const myOrgRows = myTrainerId ? await sbReq(`checkin_trainer_orgs?select=org_id&trainer_id=eq.${myTrainerId}`) : [];
     myOrgIds = (myOrgRows||[]).map(r => r.org_id);
   } catch(e){ myOrgIds = []; }
@@ -631,10 +637,22 @@ async function init(){
   CLIENT = clientRows[0];
 
   try {
-    // Same org-scoping as everywhere else: shared items (org_id null) plus whatever's
-    // specific to this client's actual org — a Studio Strong client should never see
-    // Premier U's separate clinical catalog show up here, and vice versa.
-    const orgFilter = CLIENT.org_id ? `or=(org_id.is.null,org_id.eq.${CLIENT.org_id})` : 'org_id=is.null';
+    allOrgs = await sbReq('checkin_orgs?select=id,name&archived_at=is.null&order=name');
+    let secondaryRows = [];
+    try {
+      secondaryRows = await sbReq(`checkin_client_orgs?select=org_id&client_id=eq.${CLIENT_ID}`);
+    } catch(e){ secondaryRows = []; } // table may not exist yet on an older deploy — just means no extra access, not a broken page
+    clientSecondaryOrgIds = (secondaryRows||[]).map(r => r.org_id);
+
+    // Same org-scoping as everywhere else: shared items (org_id null), whatever's
+    // specific to this client's own org, PLUS anything from an admin-granted
+    // secondary org — a Studio Strong client should never see Premier U's separate
+    // clinical catalog by default, but a specific client can be given real access
+    // to another org's catalog too, on top of their own, when it's genuinely needed.
+    const allowedOrgIds = [CLIENT.org_id, ...clientSecondaryOrgIds].filter(Boolean);
+    const orgFilter = allowedOrgIds.length
+      ? `or=(org_id.is.null,org_id.in.(${allowedOrgIds.join(',')}))`
+      : 'org_id=is.null';
     // Defensive same as the library page: archived_at is newer, fall back if it's
     // somehow not there yet rather than take down the whole assign-item picker.
     try {
@@ -651,13 +669,6 @@ async function init(){
     try {
       RESPONSES = await sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id,is_backfilled)&checkin_daily.client_id=eq.${CLIENT_ID}&order=checkin_daily(checkin_date).desc`);
     } catch(e){ RESPONSES = []; } // stats tab just shows empty rather than blocking the whole page
-    try {
-      const orgs = await sbReq('checkin_orgs?select=id,name');
-      (orgs||[]).forEach(o => {
-        if(/premier/i.test(o.name)) orgIdByKey.premier = o.id;
-        else if(/studio strong/i.test(o.name)) orgIdByKey.strong = o.id;
-      });
-    } catch(e){ /* create-new-item org toggle just won't have real ids to match against */ }
   } catch(e){
     document.getElementById('client-name').textContent = 'Could not load — check connection';
     return;
@@ -731,6 +742,7 @@ async function init(){
   renderAssignedActions();
   renderAssigned();
   renderStatsTab();
+  renderAdminOrgAccess();
 }
 
 function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : type === 'choice' ? '☰' : '#'; }
@@ -1041,6 +1053,39 @@ function closeArchiveModal(){
   document.getElementById('archive-modal').classList.add('hidden');
 }
 
+function renderAdminOrgAccess(){
+  const section = document.getElementById('admin-org-access');
+  if(!CURRENT_IS_ADMIN){ section.classList.add('hidden'); return; }
+  const otherOrgs = allOrgs.filter(o => o.id !== CLIENT.org_id);
+  if(!otherOrgs.length){ section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+  document.getElementById('admin-org-access-list').innerHTML = otherOrgs.map(o => {
+    const granted = clientSecondaryOrgIds.includes(o.id);
+    return `
+    <label style="display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer" onclick="event.preventDefault(); toggleClientOrgAccess('${o.id}')">
+      <div style="width:20px;height:20px;border-radius:6px;border:1.5px solid var(--surface-soft);background:${granted ? 'var(--teal)' : 'var(--bg)'};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        ${granted ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
+      </div>
+      <span style="font-size:13.5px;color:var(--ink)">${o.name}</span>
+    </label>`;
+  }).join('');
+}
+
+async function toggleClientOrgAccess(orgId){
+  const granting = !clientSecondaryOrgIds.includes(orgId);
+  try {
+    if(granting){
+      await sbReq('checkin_client_orgs', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({client_id: CLIENT.id, org_id: orgId})});
+    } else {
+      await sbReq(`checkin_client_orgs?client_id=eq.${CLIENT.id}&org_id=eq.${orgId}`, {method:'DELETE'});
+    }
+  } catch(e){
+    showToast('✗ Could not update org access — try again');
+    return;
+  }
+  await init();
+}
+
 function startArchiveClient(){
   openArchiveModal(
     `Archive ${CLIENT.name}?`,
@@ -1329,22 +1374,25 @@ function openPicker(){
   document.getElementById('new-item-form').classList.add('hidden');
   document.getElementById('new-item-toggle').textContent = '+ Create a new item';
 
-  // A trainer tied to just one org shouldn't be able to tag a new item for the other
-  // org, or "All orgs" — same restriction as the library tool, applied here too since
-  // this is a second, separate entry point for creating library items.
-  const allOrgOpts = document.querySelectorAll('#new-item-org .mode-opt');
-  allOrgOpts.forEach(o => { o.style.pointerEvents = ''; o.style.opacity = ''; o.classList.remove('hidden'); });
-  let orgKey;
+  // A trainer tied to just one org shouldn't be able to tag a new item for a
+  // different org, or "All orgs" — same restriction as the library tool, applied
+  // here too since this is a second, separate entry point for creating library
+  // items. A dual-org (or unrestricted) trainer sees every real org that exists.
+  const orgToggle = document.getElementById('new-item-org');
+  orgToggle.innerHTML = `<div class="mode-opt" data-org="">All orgs</div>` +
+    allOrgs.map(o => `<div class="mode-opt" data-org="${o.id}">${o.name}</div>`).join('');
+  orgToggle.style.gridTemplateColumns = `repeat(${allOrgs.length + 1}, 1fr)`;
+  let selectedOrgId;
   if(myOrgIds.length === 1){
-    const myOrgId = myOrgIds[0];
-    orgKey = myOrgId === orgIdByKey.premier ? 'premier' : myOrgId === orgIdByKey.strong ? 'strong' : '';
-    allOrgOpts.forEach(o => o.classList.toggle('hidden', o.dataset.org !== orgKey));
+    selectedOrgId = myOrgIds[0];
+    orgToggle.querySelectorAll('.mode-opt').forEach(o => o.classList.toggle('hidden', o.dataset.org !== selectedOrgId));
   } else {
+    orgToggle.querySelectorAll('.mode-opt').forEach(o => o.classList.remove('hidden'));
     // No restriction — default to whatever this client's own org actually is, same as
     // before, since that's still the sensible starting point when it's fully editable.
-    orgKey = CLIENT.org_id === orgIdByKey.premier ? 'premier' : CLIENT.org_id === orgIdByKey.strong ? 'strong' : '';
+    selectedOrgId = CLIENT.org_id || '';
   }
-  document.querySelectorAll('#new-item-org .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === orgKey));
+  orgToggle.querySelectorAll('.mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.org === selectedOrgId));
   document.getElementById('new-item-category').value = '';
   document.getElementById('new-item-name').value = '';
   document.querySelectorAll('#new-item-type .mode-opt').forEach(o => o.classList.toggle('selected', o.dataset.type === 'yesno'));
@@ -1403,7 +1451,7 @@ function addNewItemChoice(value){
 }
 
 async function createNewLibraryItem(){
-  const orgKey = document.querySelector('#new-item-org .mode-opt.selected')?.dataset.org || '';
+  const selectedOrgId = document.querySelector('#new-item-org .mode-opt.selected')?.dataset.org || '';
   const category = document.getElementById('new-item-category').value.trim() || 'Uncategorized';
   const name = document.getElementById('new-item-name').value.trim();
   if(!name){ showToast('✗ Give it a name first'); return; }
@@ -1417,7 +1465,7 @@ async function createNewLibraryItem(){
 
   const payload = {
     category, name, type,
-    org_id: orgKey ? orgIdByKey[orgKey] : null,
+    org_id: selectedOrgId || null,
     unit: type === 'numeric' ? (document.getElementById('new-item-unit').value.trim() || null) : null,
     min_value: type === 'numeric' ? 0 : null,
     max_value: type === 'numeric' ? 100 : null,
