@@ -88,6 +88,23 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
 .stat-dot.green{background:var(--green)}
 .stat-dot.amber{background:var(--amber)}
 .stat-dot.neutral{background:transparent;border:1px solid var(--surface-soft)}
+.stat-dot.no{position:relative;background:var(--surface-soft)}
+.stat-dot.no::after{content:'✕';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--ink-faint)}
+.stat-dot.rest{background:var(--teal-tint);border:1.5px solid var(--teal)}
+.stat-summary{margin-top:10px;display:flex;flex-direction:column;gap:2px}
+.stat-summary .a{font-size:12.5px;color:var(--ink-dim);line-height:1.45}
+.stat-summary .b{font-size:12px;font-weight:600;color:var(--teal-deep)}
+.history-row .val.yes{color:var(--green);font-weight:600}
+.history-row .val.rest{color:var(--teal-deep)}
+.log-month{font-size:11.5px;font-weight:700;color:var(--ink-faint);margin-top:8px}
+.log-month:first-child{margin-top:0}
+.log-late{font-size:11px;font-style:italic}
+.stats-overview{margin-bottom:14px}
+.stats-overview .main{font-size:13px;color:var(--ink-dim)}
+.stats-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:11px;color:var(--ink-faint)}
+.stats-legend span{display:inline-flex;align-items:center;gap:5px}
+.stats-legend .stat-dot{width:12px;height:12px;border-radius:4px;display:inline-block}
+.stats-legend .stat-dot.no::after{font-size:8px}
 .stat-details-toggle{font-size:12px;font-weight:600;color:var(--teal-deep);cursor:pointer;margin-top:8px}
 .history-row{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-faint)}
 .history-row .val{color:var(--ink-dim);font-weight:500}
@@ -593,6 +610,7 @@ let myOrgIds = [];    // the currently signed-in trainer's real org affiliations
 let CURRENT_IS_ADMIN = false;
 let allOrgs = [];         // every real, active org — replaces the old hardcoded strong/premier pair
 let clientSecondaryOrgIds = []; // this client's additional org grants, admin-managed
+let ALL_ASSIGN_ROWS = []; // every assignment row ever (all versions/edits), for schedule-aware history stats
 let adminOrgPanelOpen = false; // collapsed by default; survives the re-render that follows each toggle
 let assigned = [];
 let archivedItems = []; // dids with no currently-open row — closed out with no replacement, kept for history
@@ -669,7 +687,7 @@ async function init(){
       actionItemRows = await sbReq(`checkin_action_items?select=action_id,library_item_id,checkin_library_items(*)&order=display_order`);
     } catch(e){ actionRows = []; clientActionRows = []; actionItemRows = []; } // actions system just won't show — rest of the page still works
     try {
-      RESPONSES = await sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id,is_backfilled)&checkin_daily.client_id=eq.${CLIENT_ID}&order=checkin_daily(checkin_date).desc`);
+      RESPONSES = await loadAllResponses();
     } catch(e){ RESPONSES = []; } // stats tab just shows empty rather than blocking the whole page
   } catch(e){
     document.getElementById('client-name').textContent = 'Could not load — check connection';
@@ -681,6 +699,7 @@ async function init(){
   // history lives across multiple rows, distinguished by effective_from/effective_to, never
   // overwritten in place.
   const byItem = {};
+  ALL_ASSIGN_ROWS = assignRows || [];
   (assignRows||[]).forEach(r => {
     const itemId = r.checkin_library_items.id;
     if(!byItem[itemId]) byItem[itemId] = [];
@@ -930,6 +949,154 @@ function isItemExpectedOn(a, dateStr, dow){
   return false;
 }
 
+// ─── Stats tab ──────────────────────────────────────────────────────────────
+// Every response for this client, not just the first page. The API caps a single
+// request at 1000 rows, so without paging a long-tenured client on several dids
+// would have their oldest history silently cut off of a "full history" view.
+async function loadAllResponses(){
+  const PAGE = 1000, out = [];
+  for(let offset = 0; ; offset += PAGE){
+    const page = await sbReq(`checkin_responses?select=id,created_at,library_item_id,value,checkin_daily!inner(checkin_date,client_id,is_backfilled)&checkin_daily.client_id=eq.${CLIENT_ID}&order=checkin_daily(checkin_date).desc,id.asc&limit=${PAGE}&offset=${offset}`);
+    out.push(...(page || []));
+    if(!page || page.length < PAGE) break;
+  }
+  // One answer per did per day. A check-in that got submitted twice in quick
+  // succession leaves two identical rows for the same day, which would inflate
+  // every count on this tab. Keep the most recently saved one, the same way the
+  // app treats a re-submission.
+  const latest = new Map();
+  out.forEach(r => {
+    const key = `${r.library_item_id}|${r.checkin_daily.checkin_date}`;
+    const prev = latest.get(key);
+    if(!prev || (r.created_at || '') > (prev.created_at || '')) latest.set(key, r);
+  });
+  return [...latest.values()].sort((x, y) => y.checkin_daily.checkin_date.localeCompare(x.checkin_daily.checkin_date));
+}
+
+function fmtNum(n){ return Number.isFinite(n) ? (Math.round(n * 10) / 10).toLocaleString('en-US') : '—'; }
+function fmtLogDate(dateStr){ return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'}); }
+function fmtMonthLabel(dateStr){ return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {month:'long', year:'numeric'}); }
+
+// What a stored answer means regardless of item type: something real was logged
+// ('hit'), an active "no", or a rest day. Only 'hit' counts as accomplished.
+function responseKind(value){
+  if(value === 'no') return 'no';
+  if(value === 'Rest day') return 'rest';
+  return 'hit';
+}
+
+// Every date this did was actually scheduled, across every version of its
+// assignment (each edit closes one row and opens the next), so a mid-stream
+// schedule change doesn't turn old days into phantom misses. Runs through
+// yesterday; today only counts once something has been logged for it.
+function expectedDatesFor(libId, hasLoggedToday){
+  const today = localISO(new Date());
+  const dowToday = DOW_SHORT[new Date().getDay()];
+  const out = new Set();
+  ALL_ASSIGN_ROWS.filter(r => r.library_item_id === libId && r.schedule_type === 'days').forEach(r => {
+    const end = r.effective_to || today; // exclusive
+    for(let d = r.effective_from; d < end; d = addDaysToDateStr(d, 1)){
+      if((r.days || []).includes(DOW_SHORT[new Date(d + 'T12:00:00').getDay()])) out.add(d);
+    }
+    if(!r.effective_to && hasLoggedToday && (r.days || []).includes(dowToday)) out.add(today);
+  });
+  return [...out].sort();
+}
+
+// The at-a-glance summary that sits under the dots: line A is what they answered,
+// line B is how consistent they've been against the schedule.
+function itemSummary(a, rows){
+  const byDate = {};
+  rows.forEach(r => { byDate[r.checkin_daily.checkin_date] = r.value; });
+  const kinds = { hit: 0, no: 0, rest: 0 };
+  rows.forEach(r => { kinds[responseKind(r.value)]++; });
+  const unit = escapeHtml(a.unit || '');
+  const parts = [];
+
+  if(a.type === 'yesno'){
+    parts.push(`${kinds.hit} yes`, `${kinds.no} no`);
+  } else if(a.type === 'numeric'){
+    const nums = rows.filter(r => responseKind(r.value) === 'hit').map(r => parseFloat(r.value)).filter(Number.isFinite);
+    if(nums.length){
+      const avg = nums.reduce((sum, n) => sum + n, 0) / nums.length;
+      const goal = a.goal ? ` (goal ${fmtNum(a.goal)}${unit})` : '';
+      parts.push(`avg ${fmtNum(avg)}${unit}${goal}`, `range ${fmtNum(Math.min(...nums))}–${fmtNum(Math.max(...nums))}${unit}`);
+    }
+    parts.push(`${kinds.hit} logged`);
+  } else if(a.type === 'choice'){
+    const counts = {};
+    rows.filter(r => responseKind(r.value) === 'hit').forEach(r => { counts[r.value] = (counts[r.value] || 0) + 1; });
+    Object.entries(counts).sort((x, y) => y[1] - x[1]).forEach(([k, n]) => parts.push(`${escapeHtml(k)} ${n}`));
+  } else {
+    parts.push(`${kinds.hit} ${kinds.hit === 1 ? 'entry' : 'entries'}`);
+  }
+  if(kinds.rest) parts.push(`${kinds.rest} rest`);
+
+  let lineB = '';
+  if(a.scheduleType === 'days'){
+    const expected = expectedDatesFor(a.libId, localISO(new Date()) in byDate);
+    if(expected.length){
+      let hits = 0, rests = 0, missed = 0, run = 0, best = 0;
+      expected.forEach(d => {
+        const k = d in byDate ? responseKind(byDate[d]) : 'missed';
+        if(k === 'hit') hits++; else if(k === 'rest') rests++; else if(k === 'missed') missed++;
+        // Streaks: a rest day is neutral, it neither extends nor breaks a run.
+        if(k === 'hit'){ run++; best = Math.max(best, run); }
+        else if(k !== 'rest') run = 0;
+      });
+      if(missed) parts.push(`${missed} missed`);
+      const denom = expected.length - rests;
+      const pct = denom > 0 ? Math.round(hits / denom * 100) : null;
+      lineB = [pct !== null ? `${pct}% of scheduled days` : '', `streak ${run}`, `best ${best}`].filter(Boolean).join(' · ');
+    }
+  } else if(a.scheduleType === 'weekly'){
+    const start = ALL_ASSIGN_ROWS.filter(r => r.library_item_id === a.libId).map(r => r.effective_from).sort()[0];
+    if(start){
+      const spanDays = Math.max(1, Math.round((new Date(localISO(new Date()) + 'T12:00:00') - new Date(start + 'T12:00:00')) / 86400000));
+      const perWeek = kinds.hit / Math.max(1, spanDays / 7);
+      lineB = `avg ${fmtNum(perWeek)} per week` + (a.weeklyCount ? ` (target ${a.weeklyCount})` : '');
+    }
+  }
+  // Keep each count glued to its label so "7 missed" can't split across a line break
+  return { lineA: parts.map(t => t.replace(/^(\d[\d,.]*) /, '$1\u00a0')).join(' · '), lineB };
+}
+
+function logRowHtml(a, r){
+  const date = r.checkin_daily.checkin_date;
+  const kind = responseKind(r.value);
+  const late = r.checkin_daily.is_backfilled ? ' <span class="log-late">· logged later</span>' : '';
+  if(a.type === 'reflection' && kind === 'hit'){
+    return `<div class="history-row" style="flex-direction:column;align-items:flex-start;gap:3px"><span>${fmtLogDate(date)}${late}</span><span class="val" style="font-weight:400;color:var(--ink);white-space:pre-wrap">${escapeHtml(r.value)}</span></div>`;
+  }
+  let label, cls = '';
+  if(kind === 'rest'){ label = 'Rest day'; cls = 'rest'; }
+  else if(a.type === 'yesno'){ label = kind === 'no' ? 'No' : 'Yes'; cls = kind === 'hit' ? 'yes' : ''; }
+  else if(a.type === 'numeric'){ const n = parseFloat(r.value); label = Number.isFinite(n) ? `${fmtNum(n)}${escapeHtml(a.unit || '')}` : escapeHtml(r.value); }
+  else label = escapeHtml(r.value);
+  return `<div class="history-row"><span>${fmtLogDate(date)}${late}</span><span class="val ${cls}">${label}</span></div>`;
+}
+
+function logPanelHtml(a, rows){
+  let html = '', lastMonth = '';
+  rows.forEach(r => {
+    const date = r.checkin_daily.checkin_date;
+    if(date.slice(0, 7) !== lastMonth){ html += `<div class="log-month">${fmtMonthLabel(date)}</div>`; lastMonth = date.slice(0, 7); }
+    html += logRowHtml(a, r);
+  });
+  return html;
+}
+
+function statsOverviewHtml(todayStr){
+  const dates = [...new Set(RESPONSES.map(r => r.checkin_daily.checkin_date))].sort();
+  if(!dates.length) return '';
+  const last = dates[dates.length - 1];
+  const lastLabel = last === todayStr ? 'today' : last === addDaysToDateStr(todayStr, -1) ? 'yesterday' : fmtDate(last);
+  return `<div class="stats-overview">
+    <div class="main">${dates.length} check-in ${dates.length === 1 ? 'day' : 'days'} since ${fmtDate(dates[0])} · last check-in ${lastLabel}</div>
+    <div class="stats-legend"><span><i class="stat-dot green"></i>done</span><span><i class="stat-dot no"></i>said no</span><span><i class="stat-dot rest"></i>rest day</span><span><i class="stat-dot amber"></i>scheduled, no check-in</span></div>
+  </div>`;
+}
+
 function renderStatsTab(){
   const list = document.getElementById('stats-list');
   const empty = document.getElementById('stats-empty');
@@ -939,61 +1106,61 @@ function renderStatsTab(){
     return;
   }
   empty.classList.add('hidden');
-  list.innerHTML = assigned.map((a, i) => {
-    const rows = RESPONSES.filter(r => r.library_item_id === a.libId);
+  const todayStr = localISO(new Date());
+
+  list.innerHTML = statsOverviewHtml(todayStr) + assigned.map((a, i) => {
+    const rows = RESPONSES.filter(r => r.library_item_id === a.libId)
+      .sort((x, y) => y.checkin_daily.checkin_date.localeCompare(x.checkin_daily.checkin_date));
     const header = `<div class="assigned-name-row"><div class="assigned-name-block"><div class="type-badge ${a.type}">${typeIcon(a.type)}</div><div class="assigned-name">${a.name}</div></div></div>`;
 
-    // Same dot-row for every item type — white/amber/green, schedule-aware,
-    // same rule the roster already uses: green means something was logged
-    // that day, regardless of what the actual value was.
+    // Same dot-row for every item type, schedule-aware. Each day is one of:
+    // green (something real was logged), no (answered "no"), rest (rest day),
+    // amber (scheduled but nothing logged), or hollow (not scheduled).
     const byDate = {};
     rows.forEach(r => { byDate[r.checkin_daily.checkin_date] = r; });
     const today = new Date();
     let dotsHtml = '';
-    for(let d=6; d>=0; d--){
+    for(let d = 6; d >= 0; d--){
       const date = new Date(today); date.setDate(date.getDate() - d);
       const dateStr = localISO(date);
       const dow = DOW_SHORT[date.getDay()];
-      const label = dateStr === localISO(today) ? 'Now' : date.toLocaleDateString('en-US', {weekday:'narrow'});
-      let cls = 'neutral';
-      let backfilled = false;
-      if(byDate[dateStr]){ cls = 'green'; backfilled = !!byDate[dateStr].checkin_daily.is_backfilled; }
-      else if(isItemExpectedOn(a, dateStr, dow)) cls = 'amber';
-      dotsHtml += `<div class="stat-dot-col"><div class="stat-dot-label">${label}</div><div class="stat-dot ${cls}" title="${fmtDate(dateStr)}${backfilled ? ' — logged later' : ''}" style="${backfilled ? 'box-shadow:0 0 0 2px var(--amber)' : ''}"></div></div>`;
+      const label = dateStr === todayStr ? 'Now' : date.toLocaleDateString('en-US', {weekday:'narrow'});
+      const r = byDate[dateStr];
+      let cls = 'neutral', tip = fmtDate(dateStr), backfilled = false;
+      if(r){
+        const kind = responseKind(r.value);
+        cls = kind === 'hit' ? 'green' : kind;
+        tip += ' — ' + (kind === 'rest' ? 'rest day' : kind === 'no' ? 'said no' : a.type === 'yesno' ? 'yes' : escapeHtml(String(r.value).slice(0, 60)));
+        backfilled = !!r.checkin_daily.is_backfilled;
+        if(backfilled) tip += ' (logged later)';
+      } else if(isItemExpectedOn(a, dateStr, dow)){
+        cls = 'amber';
+        tip += ' — scheduled, no check-in';
+      }
+      dotsHtml += `<div class="stat-dot-col"><div class="stat-dot-label">${label}</div><div class="stat-dot ${cls}" title="${tip}" style="${backfilled ? 'box-shadow:0 0 0 2px var(--amber)' : ''}"></div></div>`;
     }
     const dotRow = `<div class="stat-dot-row">${dotsHtml}</div>`;
 
-    // A number or free text is a real value, not just hit/miss — the dot-row
-    // above covers "did they check in", this covers "what did they actually
-    // say", tucked behind a dropdown so it doesn't clutter the default view.
-    if(a.type === 'numeric' || a.type === 'reflection'){
-      if(!rows.length){
-        return `<div class="assigned-card">${header}${dotRow}<div style="font-size:13px;color:var(--ink-faint);margin-top:8px">No check-ins logged yet.</div></div>`;
-      }
-      const rowHtml = r => a.type === 'reflection'
-        ? `<div class="history-row" style="flex-direction:column;align-items:flex-start;gap:3px"><span style="color:var(--ink-faint);font-size:12px">${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val" style="font-weight:400;color:var(--ink)">${escapeHtml(r.value)}</span></div>`
-        : `<div class="history-row"><span>${fmtDate(r.checkin_daily.checkin_date)}</span><span class="val">${escapeHtml(r.value)}</span></div>`;
-      return `
-        <div class="assigned-card">
-          ${header}
-          ${dotRow}
-          <div class="stat-details-toggle" onclick="toggleStatsExpand(${i})">▸ Show details (${rows.length} logged)</div>
-          <div class="history-panel hidden" id="stats-expand-${i}">${rows.map(rowHtml).join('')}</div>
-        </div>`;
+    if(!rows.length){
+      return `<div class="assigned-card">${header}${dotRow}<div style="font-size:13px;color:var(--ink-faint);margin-top:8px">No check-ins logged yet.</div></div>`;
     }
-
-    return `<div class="assigned-card">${header}${dotRow}</div>`;
+    const sum = itemSummary(a, rows);
+    return `
+      <div class="assigned-card">
+        ${header}
+        ${dotRow}
+        <div class="stat-summary"><div class="a">${sum.lineA}</div>${sum.lineB ? `<div class="b">${sum.lineB}</div>` : ''}</div>
+        <div class="stat-details-toggle" data-count="${rows.length}" onclick="toggleStatsExpand(${i})">▸ All check-ins (${rows.length})</div>
+        <div class="history-panel hidden" id="stats-expand-${i}">${logPanelHtml(a, rows)}</div>
+      </div>`;
   }).join('');
 }
 
 function toggleStatsExpand(i){
   const panel = document.getElementById('stats-expand-' + i);
-  const wasHidden = panel.classList.contains('hidden');
-  panel.classList.toggle('hidden');
   const toggle = panel.previousElementSibling;
-  if(toggle && toggle.classList.contains('stat-details-toggle')){
-    toggle.textContent = wasHidden ? '▾ Hide details' : `▸ Show details (${panel.children.length} logged)`;
-  }
+  const opening = panel.classList.toggle('hidden') === false;
+  toggle.textContent = opening ? '▾ Hide check-ins' : `▸ All check-ins (${toggle.dataset.count})`;
 }
 
 function escapeHtml(s){
