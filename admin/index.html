@@ -592,6 +592,7 @@ const DOW_LABELS = (() => {
 })();
 // Live at reelcall.app, not prouhet.github.io — the custom domain on that repo covers the whole site, not just ReelCall's own pages.
 const BASE_URL = 'https://dids.today/';
+const ADMIN_BASE_URL = BASE_URL + 'admin/index.html'; // trainer logins open the admin tool, never the client check-in page
 // ─── Real config — same pattern as index.html / client_manage_dids.html ────
 const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
@@ -765,7 +766,7 @@ function trainerOf(id){ return trainers.find(t => t.id === id); }
 function renderTrainers(){
   document.getElementById('trainer-list').innerHTML = trainers.filter(t => !t.archived).map(t => {
     const count = clients.filter(c => c.trainerId === t.id && !c.archived).length;
-    const shortLink = BASE_URL.replace('https://','') + '?id=' + t.token;
+    const shortLink = ADMIN_BASE_URL.replace('https://','') + '?id=' + t.token;
     return `
       <div class="trainer-card">
         <div style="display:flex;align-items:center;gap:13px;flex:1;min-width:0;cursor:pointer" onclick="openRoster('${t.id}', true)">
@@ -789,7 +790,7 @@ function renderTrainers(){
 }
 
 function copyTrainerLink(name, token){
-  const url = BASE_URL + '?id=' + token;
+  const url = ADMIN_BASE_URL + '?id=' + token;
   const firstName = name.split(' ')[0];
   if(navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(url).then(
