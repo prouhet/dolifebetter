@@ -190,12 +190,13 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="showClientLink()">🔗 Get their link</div>
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="previewCheckin()">👀 Preview their check-in</div>
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="openChangeTrainer()">↔️ Change trainer</div>
+        <div id="admin-org-link" class="hidden" style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="toggleAdminOrgPanel()">🏢 Org access</div>
         <div style="font-size:13px;font-weight:600;color:var(--care);cursor:pointer" onclick="startArchiveClient()">🗄️ Archive this client</div>
       </div>
 
-      <div id="admin-org-access" class="hidden" style="margin:-8px 0 20px;padding:14px 16px;background:var(--surface);border:1px solid var(--surface-soft);border-radius:14px">
-        <div style="font-size:12.5px;font-weight:600;color:var(--ink-faint);margin-bottom:8px">Additional organizations <span style="font-weight:400">— admin only. Gives this client's catalog access to another org's items too, on top of their own.</span></div>
-        <div id="admin-org-access-list"></div>
+      <div id="admin-org-access" class="hidden" style="margin:-8px 0 18px;padding:10px 14px;background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px">
+        <div style="font-size:12px;color:var(--ink-faint);margin-bottom:6px">Also let this client pick from these orgs' items:</div>
+        <div id="admin-org-access-list" style="display:flex;flex-wrap:wrap;gap:6px 18px"></div>
       </div>
 
       <div id="link-modal" class="hidden" style="position:fixed;inset:0;background:rgba(20,32,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px" onclick="if(event.target===this)closeClientLinkModal()">
@@ -592,6 +593,7 @@ let myOrgIds = [];    // the currently signed-in trainer's real org affiliations
 let CURRENT_IS_ADMIN = false;
 let allOrgs = [];         // every real, active org — replaces the old hardcoded strong/premier pair
 let clientSecondaryOrgIds = []; // this client's additional org grants, admin-managed
+let adminOrgPanelOpen = false; // collapsed by default; survives the re-render that follows each toggle
 let assigned = [];
 let archivedItems = []; // dids with no currently-open row — closed out with no replacement, kept for history
 let actions = [];        // this org's available actions, each with its item pool
@@ -1054,21 +1056,30 @@ function closeArchiveModal(){
 }
 
 function renderAdminOrgAccess(){
-  const section = document.getElementById('admin-org-access');
-  if(!CURRENT_IS_ADMIN){ section.classList.add('hidden'); return; }
-  const otherOrgs = allOrgs.filter(o => o.id !== CLIENT.org_id);
-  if(!otherOrgs.length){ section.classList.add('hidden'); return; }
-  section.classList.remove('hidden');
+  const link = document.getElementById('admin-org-link');
+  const panel = document.getElementById('admin-org-access');
+  const otherOrgs = CURRENT_IS_ADMIN ? allOrgs.filter(o => o.id !== CLIENT.org_id) : [];
+  if(!otherOrgs.length){ link.classList.add('hidden'); panel.classList.add('hidden'); return; }
+  link.classList.remove('hidden');
+  // Show how many extra orgs are granted right on the link, so it's visible without opening it
+  const granted = otherOrgs.filter(o => clientSecondaryOrgIds.includes(o.id)).length;
+  link.textContent = granted ? `🏢 Org access (${granted})` : '🏢 Org access';
+  panel.classList.toggle('hidden', !adminOrgPanelOpen);
   document.getElementById('admin-org-access-list').innerHTML = otherOrgs.map(o => {
-    const granted = clientSecondaryOrgIds.includes(o.id);
+    const on = clientSecondaryOrgIds.includes(o.id);
     return `
-    <label style="display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer" onclick="event.preventDefault(); toggleClientOrgAccess('${o.id}')">
-      <div style="width:20px;height:20px;border-radius:6px;border:1.5px solid var(--surface-soft);background:${granted ? 'var(--teal)' : 'var(--bg)'};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-        ${granted ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="event.preventDefault(); toggleClientOrgAccess('${o.id}')">
+      <div style="width:18px;height:18px;border-radius:5px;border:1.5px solid var(--surface-soft);background:${on ? 'var(--teal)' : 'var(--bg)'};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        ${on ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
       </div>
-      <span style="font-size:13.5px;color:var(--ink)">${o.name}</span>
+      <span style="font-size:13px;color:var(--ink)">${o.name}</span>
     </label>`;
   }).join('');
+}
+
+function toggleAdminOrgPanel(){
+  adminOrgPanelOpen = !adminOrgPanelOpen;
+  renderAdminOrgAccess();
 }
 
 async function toggleClientOrgAccess(orgId){
