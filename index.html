@@ -420,6 +420,7 @@ let allAssignments = null; // every active assignment, unfiltered by today's sch
 let pendingCelebrationId = null; // the assignment currently being celebrated, so dismissCelebration() knows which one to mark done
 let YESTERDAY_ASSIGNMENTS = []; // what would have been due yesterday, for the "forgot to log" backfill flow
 let isBackfillMode = false; // true while ASSIGNMENTS/ANSWERS have been swapped to represent yesterday instead of today
+let isSubmitting = false; // a second tap on Check In while a save is already in flight is ignored here, not duplicated
 let isRestDay = false;
 
 const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -824,6 +825,9 @@ async function upsertDaily(payload){
 }
 
 async function doSubmit(note){
+  if(isSubmitting) return;
+  isSubmitting = true;
+  try {
   if(PREVIEW_MODE){
     await showConfirm(needsHelpChecked, note); // same confirmation a client would see, just nothing was actually written
     return;
@@ -892,6 +896,9 @@ async function doSubmit(note){
     notifyTrainer(note); // fire-and-forget — a real check-in already saved either way
   }
   await maybeCheckPeriodic(note);
+  } finally {
+    isSubmitting = false;
+  }
 }
 
 function notifyTrainer(note){
