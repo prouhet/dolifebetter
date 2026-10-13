@@ -590,9 +590,8 @@ const ARROW_UP = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" st
 const ARROW_DOWN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
 let reorderNote = '';
 function updateReorderBar(){
-  // Not while logging yesterday, and not with only one item. In a trainer preview it is shown so
-  // the trainer can see and try it, but nothing is saved (see moveToday).
-  const can = !isBackfillMode && ASSIGNMENTS.length >= 2;
+  // Not while previewing (nothing may be written), not while logging yesterday, and not with only one item.
+  const can = !PREVIEW_MODE && !isBackfillMode && ASSIGNMENTS.length >= 2;
   if(!can) isReorderMode = false;
   document.getElementById('reorder-bar').classList.toggle('hidden', !can);
   document.getElementById('reorder-toggle').textContent = isReorderMode ? 'Done' : '↕ Change the order';
@@ -616,12 +615,6 @@ function moveToday(assignmentId, direction){
   const wanted = FULL_ORDER.map((a, idx) => ({id: a.id, order: (idx + 1) * 10}));
   FULL_ORDER.forEach((a, idx) => { a.sort_order = wanted[idx].order; });
   YESTERDAY_ASSIGNMENTS.sort(byOrder);
-  if(PREVIEW_MODE){
-    // Preview never writes. The list moves on screen so it can be tried out, and that is all.
-    reorderNote = "Preview only — this order isn't saved.";
-    renderPoll();
-    return;
-  }
   reorderNote = '';
   renderPoll();
   const gen = reorderGen;
