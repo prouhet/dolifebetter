@@ -104,6 +104,7 @@ textarea::placeholder, input::placeholder{color:var(--ink-faint)}
 .type-opt{border-radius:12px;border:1.5px solid var(--surface-soft);background:var(--surface);padding:12px;text-align:center;
   cursor:pointer;font-size:13.5px;font-weight:500;transition:all .15s ease}
 .type-opt.selected{border-color:var(--teal);background:var(--teal-tint);color:var(--teal-deep)}
+.type-hint{font-size:12.5px;line-height:1.45;color:var(--ink-faint);margin-top:9px}
 
 .note-callout{display:flex;gap:10px;padding:13px 14px;border-radius:12px;background:var(--amber-tint);border:1px solid rgba(201,147,46,.25);margin-bottom:20px}
 .note-icon{flex-shrink:0;font-size:15px}
@@ -262,6 +263,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
             <div class="type-opt" data-type="reflection">Talk / type</div>
             <div class="type-opt" data-type="choice">Multiple choice</div>
           </div>
+          <div class="type-hint" id="type-hint"></div>
         </div>
 
         <div class="field-block hidden" id="choices-block">
@@ -272,7 +274,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
 
         <div class="field-block" id="unit-block">
           <div class="field-label">Unit</div>
-          <input type="text" id="draft-unit" value="reps" placeholder="g, hrs, steps, reps…">
+          <input type="text" id="draft-unit" value="reps" placeholder="g, hrs, steps, reps…" oninput="updateRangePreview()">
         </div>
 
         <div class="field-block" id="minmax-block">
@@ -280,13 +282,14 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <div style="display:flex;gap:10px">
             <div style="flex:1">
               <div style="font-size:11px;color:var(--ink-faint);margin-bottom:5px">Min</div>
-              <input type="text" id="draft-min" value="0">
+              <input type="text" inputmode="decimal" id="draft-min" placeholder="e.g. 1" oninput="updateRangePreview()">
             </div>
             <div style="flex:1">
               <div style="font-size:11px;color:var(--ink-faint);margin-bottom:5px">Max</div>
-              <input type="text" id="draft-max" value="50">
+              <input type="text" inputmode="decimal" id="draft-max" placeholder="e.g. 10" oninput="updateRangePreview()">
             </div>
           </div>
+          <div class="type-hint" id="range-preview"></div>
         </div>
 
         <div class="field-block">
@@ -419,7 +422,7 @@ async function loadLibrary(){
   buildOrgUI();
   library = (items||[]).map(r => ({
     id: r.id, category: r.category, subCategory: r.sub_category, orgId: r.org_id,
-    name: r.name, type: r.type, unit: r.unit, min: r.min_value, max: r.max_value,
+    name: r.name, type: r.type, unit: r.unit || '', min: r.min_value, max: r.max_value,
     question: r.question, guidance: r.guidance, recommendation: r.recommendation, choices: r.choices
   }));
 }
@@ -606,6 +609,7 @@ function openEditItem(id){
   document.getElementById('draft-subcategory').value = item.subCategory || '';
   document.getElementById('draft-name').value = item.name || '';
   document.querySelectorAll('#type-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.type === item.type));
+  updateTypeHint(item.type);
   document.getElementById('unit-block').classList.toggle('hidden', item.type !== 'numeric');
   document.getElementById('minmax-block').classList.toggle('hidden', item.type !== 'numeric');
   document.getElementById('choices-block').classList.toggle('hidden', item.type !== 'choice');
@@ -614,8 +618,11 @@ function openEditItem(id){
     (item.choices && item.choices.length ? item.choices : ['', '']).forEach(c => addChoiceInput(c));
   }
   document.getElementById('draft-unit').value = item.unit || '';
-  document.getElementById('draft-min').value = item.min != null ? item.min : 0;
-  document.getElementById('draft-max').value = item.max != null ? item.max : 100;
+  // No silent 0–100 default: an item that never had a range (e.g. one just switched over
+  // from a text question) starts blank so the trainer has to choose it on purpose.
+  document.getElementById('draft-min').value = item.min != null ? item.min : '';
+  document.getElementById('draft-max').value = item.max != null ? item.max : '';
+  updateRangePreview();
   document.getElementById('draft-question').value = item.question || '';
   document.getElementById('draft-guidance').value = item.guidance || '';
   document.getElementById('draft-recommendation').value = item.recommendation || '';
@@ -638,11 +645,11 @@ function openClientStats(itemIdx, clientIdx){
   document.getElementById('cstats-name-inline').textContent = c.name.split(' ')[0];
 
   const goalCallout = document.getElementById('cstats-goal-callout');
-  if(item.type === 'numeric'){
+  if(item.type === 'numeric' && c.goal != null){
     goalCallout.classList.remove('hidden');
     document.getElementById('cstats-goal-label').textContent = 'Current goal';
     document.getElementById('cstats-goal-value').textContent = c.goal + item.unit;
-  } else if(c.goalLabel){
+  } else if(item.type !== 'numeric' && c.goalLabel){
     goalCallout.classList.remove('hidden');
     document.getElementById('cstats-goal-label').textContent = 'Target';
     document.getElementById('cstats-goal-value').textContent = c.goalLabel;
@@ -655,6 +662,15 @@ function openClientStats(itemIdx, clientIdx){
     previewEl.innerHTML = `
       <div class="preview-q">${item.question}</div>
       <div class="preview-pills"><div class="preview-pill">Yes</div><div class="preview-pill">No</div></div>`;
+  } else if(c.goal == null){
+    // A slider with no goal (e.g. a 1–10 rating): no goal tick, thumb parked in the middle.
+    previewEl.innerHTML = `
+      <div class="preview-q">${item.question}</div>
+      <div class="preview-slider-track">
+        <div class="preview-slider-fill" style="width:50%"></div>
+        <div class="preview-slider-thumb" style="left:50%"></div>
+      </div>
+      <div class="preview-scale"><span>${item.min ?? 0}${item.unit||''}</span><span>${item.max ?? 100}${item.unit||''}</span></div>`;
   } else {
     const max = PREVIEW_MAX[item.id] || (c.goal * 2);
     const pct = Math.min(100, Math.round((c.goal / max) * 100));
@@ -678,7 +694,7 @@ function openClientStats(itemIdx, clientIdx){
     histEl.innerHTML = c.history.map(h => `
       <div class="client-row" style="cursor:default;justify-content:space-between">
         <span style="font-size:12.5px;color:var(--ink-faint)">${h.from} – ${h.to}</span>
-        <span style="font-size:13.5px;font-weight:700;color:${h.to==='now'?'var(--teal-deep)':'var(--ink-dim)'}">${h.goal}${item.unit}</span>
+        <span style="font-size:13.5px;font-weight:700;color:${h.to==='now'?'var(--teal-deep)':'var(--ink-dim)'}">${h.goal != null ? h.goal + item.unit : 'no goal'}</span>
       </div>`).join('');
   } else {
     histLabel.classList.add('hidden');
@@ -690,10 +706,39 @@ function openClientStats(itemIdx, clientIdx){
 
 
 
+// One plain-English line under the Type buttons so it's clear what each type does.
+// "Numeric + goal" is the only type with two ways to display, so that's spelled out:
+// the slider isn't a separate type — the trainer picks slider or number box when
+// assigning it to a client, and the goal is optional.
+const TYPE_HINTS = {
+  yesno: 'Two big buttons, Yes and No.',
+  numeric: 'A number the client logs. It shows as a slider or a number box — you pick which when you assign it to a client. A goal is optional: leave it blank for something like a 1–10 rating.',
+  reflection: 'A text box the client types into (or dictates with the mic).',
+  choice: 'Tappable options — the client picks one each day.'
+};
+function updateTypeHint(type){
+  const el = document.getElementById('type-hint');
+  if(el) el.textContent = TYPE_HINTS[type] || '';
+}
+// Shows the trainer exactly what the client's slider will span, so the range is
+// something they chose rather than something that quietly defaulted to 0–100.
+function updateRangePreview(){
+  const el = document.getElementById('range-preview');
+  if(!el) return;
+  const min = parseFloat(document.getElementById('draft-min').value);
+  const max = parseFloat(document.getElementById('draft-max').value);
+  const unit = document.getElementById('draft-unit').value.trim();
+  el.textContent = (Number.isFinite(min) && Number.isFinite(max) && max > min)
+    ? `Clients will see a slider from ${min}${unit} to ${max}${unit}.`
+    : 'Set the lowest and highest number a client can pick (for a 1–10 rating: Min 1, Max 10).';
+}
+
 document.getElementById('type-toggle').addEventListener('click', e => {
   const opt = e.target.closest('.type-opt'); if(!opt) return;
   document.querySelectorAll('#type-toggle .type-opt').forEach(o => o.classList.toggle('selected', o===opt));
+  updateTypeHint(opt.dataset.type);
   const isNumeric = opt.dataset.type === 'numeric';
+  if(isNumeric) updateRangePreview();
   const isChoice = opt.dataset.type === 'choice';
   document.getElementById('unit-block').classList.toggle('hidden', !isNumeric);
   document.getElementById('minmax-block').classList.toggle('hidden', !isNumeric);
@@ -775,13 +820,15 @@ function openAddNewItem(){
   document.getElementById('draft-subcategory').value = '';
   document.getElementById('draft-name').value = '';
   document.querySelectorAll('#type-toggle .type-opt').forEach(o => o.classList.toggle('selected', o.dataset.type === 'numeric'));
+  updateTypeHint('numeric');
   document.getElementById('unit-block').classList.remove('hidden');
   document.getElementById('minmax-block').classList.remove('hidden');
   document.getElementById('choices-block').classList.add('hidden');
   document.getElementById('choices-list').innerHTML = '';
   document.getElementById('draft-unit').value = '';
-  document.getElementById('draft-min').value = 0;
-  document.getElementById('draft-max').value = 100;
+  document.getElementById('draft-min').value = '';
+  document.getElementById('draft-max').value = '';
+  updateRangePreview();
   document.getElementById('draft-question').value = '';
   document.getElementById('draft-guidance').value = '';
   document.getElementById('draft-recommendation').value = '';
@@ -803,12 +850,22 @@ async function saveItem(){
     if(choices.length < 2){ showToast('✗ Add at least 2 options'); return; }
   }
 
+  let minValue = null, maxValue = null;
+  if(type === 'numeric'){
+    minValue = parseFloat(document.getElementById('draft-min').value);
+    maxValue = parseFloat(document.getElementById('draft-max').value);
+    if(!Number.isFinite(minValue) || !Number.isFinite(maxValue) || maxValue <= minValue){
+      showToast('✗ Set the slider range — Max has to be higher than Min');
+      return;
+    }
+  }
+
   const payload = {
     category, sub_category: subCategory, name, type,
     org_id: selectedOrgId || null,
     unit: type === 'numeric' ? (document.getElementById('draft-unit').value.trim() || null) : null,
-    min_value: type === 'numeric' ? parseFloat(document.getElementById('draft-min').value || '0') : null,
-    max_value: type === 'numeric' ? parseFloat(document.getElementById('draft-max').value || '100') : null,
+    min_value: minValue,
+    max_value: maxValue,
     choices,
     question: document.getElementById('draft-question').value.trim() || name,
     guidance: document.getElementById('draft-guidance').value.trim() || null,

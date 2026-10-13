@@ -42,6 +42,8 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
 
 .q-block{margin-bottom:28px}
 .q-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px}
+.week-progress{font-size:12.5px;font-weight:600;color:var(--ink-faint);margin:-6px 0 12px}
+.week-progress.done{color:var(--teal-deep)}
 .q-label{font-size:15px;font-weight:500;line-height:1.4;letter-spacing:-.005em}
 
 .pill-row{display:flex;gap:10px}
@@ -489,6 +491,63 @@ async function submitVerify(){
     }
   }
 }
+// ─── Weekly progress ("2 of 3 this week") ────────────────────────────────
+// Shown only for items scheduled "times per week". The week starts on Sunday.
+// Nothing caps the count: a client can log more than the goal, and the line says so
+// ("4 this week · goal 3") instead of showing a negative number remaining.
+let WEEK_PRIOR = {}; // assignment id → how many earlier days this week count
+
+function weekStartISO(){
+  const d = new Date(); d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - d.getDay()); // getDay(): Sunday is 0, so this lands on Sunday
+  return localISO(d);
+}
+function countsTowardWeek(item, value){
+  if(value === undefined || value === null || String(value).trim() === '') return false;
+  if(value === 'Rest day') return false;            // an intentional pass, not progress
+  if(item.type === 'yesno') return value === 'yes'; // only an actual "yes" counts
+  return true;                                      // any real answer counts for every other type
+}
+async function loadWeekProgress(){
+  WEEK_PRIOR = {};
+  const weekly = (allAssignments||[]).filter(a => a.schedule_type === 'weekly' && a.weekly_count && a.checkin_library_items);
+  const start = weekStartISO(), today = todayISO();
+  if(!weekly.length || start >= today) return; // none to show, or it's Sunday — nothing earlier this week yet
+  let rows = [];
+  try {
+    rows = await sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT.id}&checkin_daily.checkin_date=gte.${start}&checkin_daily.checkin_date=lt.${today}`);
+  } catch(e){ return; } // if this fails the line just counts from today — never block the check-in
+  weekly.forEach(a => {
+    const days = new Set();
+    (rows||[]).forEach(r => {
+      if(r.library_item_id === a.checkin_library_items.id && countsTowardWeek(a.checkin_library_items, r.value)){
+        days.add(r.checkin_daily.checkin_date);
+      }
+    });
+    WEEK_PRIOR[a.id] = days.size;
+  });
+}
+// Earlier days this week + today's answer as it stands on screen (so it updates live).
+function weekProgress(a){
+  if(a.schedule_type !== 'weekly' || !a.weekly_count) return null;
+  if(isBackfillMode) return null; // logging yesterday: it may belong to last week, so don't show a count
+  const n = (WEEK_PRIOR[a.id] || 0) + (countsTowardWeek(a.checkin_library_items, ANSWERS[a.id]) ? 1 : 0);
+  const goal = a.weekly_count;
+  if(n < goal) return {text: `${n} of ${goal} this week`, done: false};
+  if(n === goal) return {text: `${n} of ${goal} this week ✓`, done: true};
+  return {text: `${n} this week · goal ${goal} ✓`, done: true};
+}
+function weekProgressHtml(a){
+  const p = weekProgress(a);
+  return p ? `<div class="week-progress${p.done?' done':''}" id="week-${a.id}">${p.text}</div>` : '';
+}
+function refreshWeekProgress(){
+  ASSIGNMENTS.forEach(a => {
+    const el = document.getElementById('week-'+a.id), p = weekProgress(a);
+    if(el && p){ el.textContent = p.text; el.classList.toggle('done', p.done); }
+  });
+}
+
 async function continueAfterVerify(){
   const trainerFirst = (CLIENT.checkin_trainers?.name || 'your trainer').split(' ')[0];
   document.querySelectorAll('#trainer-name-inline, #trainer-name-inline-2, #trainer-name-inline-nothing').forEach(el => el.textContent = trainerFirst);
@@ -542,6 +601,8 @@ async function continueAfterVerify(){
       if(a) ANSWERS[a.id] = r.value;
     });
   }
+
+  await loadWeekProgress();
 
   document.getElementById('poll-greeting').textContent = `Hey ${CLIENT.name.split(' ')[0]} 👋`;
   document.getElementById('poll-stats-link').href = `client_stats_page.html?id=${CLIENT.token}`;
@@ -642,7 +703,7 @@ function renderPoll(){
     if(item.type === 'yesno'){
       return `
         <div class="q-block">
-          <div class="q-row"><div class="q-label">${item.question}</div></div>
+          <div class="q-row"><div class="q-label">${item.question}</div></div>${weekProgressHtml(a)}
           <div class="pill-row" data-assignment="${a.id}">
             <div class="pill ${existing==='yes'?'selected':''}" data-val="yes" onclick="answerYesNo('${a.id}','yes')">Yes</div>
             <div class="pill ${existing==='no'?'selected':''}" data-val="no" onclick="answerYesNo('${a.id}','no')">No</div>
@@ -652,7 +713,7 @@ function renderPoll(){
       const opts = item.choices || [];
       return `
         <div class="q-block">
-          <div class="q-row"><div class="q-label">${item.question}</div></div>
+          <div class="q-row"><div class="q-label">${item.question}</div></div>${weekProgressHtml(a)}
           <div class="pill-row" data-assignment="${a.id}" style="flex-wrap:wrap">
             ${opts.map(opt => `<div class="pill ${existing===opt?'selected':''}" data-val="${opt}" onclick="answerChoice('${a.id}', '${opt.replace(/'/g,"\\'")}')">${opt}</div>`).join('')}
           </div>
@@ -666,7 +727,7 @@ function renderPoll(){
       if(a.input_style === 'textbox'){
         return `
           <div class="q-block">
-            <div class="q-row"><div class="q-label">${item.question}</div></div>
+            <div class="q-row"><div class="q-label">${item.question}</div></div>${weekProgressHtml(a)}
             <div class="textbox-row">
               <input type="number" inputmode="decimal" value="${existing!=null?existing:''}" placeholder="0" oninput="answerNumeric('${a.id}', this.value)">
               <span class="textbox-unit">${unit}</span>
@@ -679,11 +740,12 @@ function renderPoll(){
         const goalPct = (goal!=null && max>min) ? ((goal-min)/(max-min))*100 : null;
         return `
           <div class="q-block">
-            <div class="q-row"><div class="q-label">${item.question}</div></div>
+            <div class="q-row"><div class="q-label">${item.question}</div></div>${weekProgressHtml(a)}
             <div class="slider-value-row"><span class="slider-value ${existing==null?'untouched':''}" id="sliderval-${a.id}">${existing!=null?existing+unit:'Drag to log'}</span></div>
             <div class="slider-track-wrap">
               <input type="range" min="${min}" max="${max}" step="${step}" value="${val}" class="slider" id="slider-${a.id}"
-                style="--pct:${pct}%" oninput="answerSlider('${a.id}', this, ${min}, ${max}, '${unit}')">
+                style="--pct:${pct}%" oninput="answerSlider('${a.id}', this, ${min}, ${max}, '${unit}')"
+                onpointerup="answerSlider('${a.id}', this, ${min}, ${max}, '${unit}')">
               ${goalPct!=null ? `<div class="goal-marker" style="left:${goalPct}%"></div><div class="goal-marker-label" style="left:${goalPct}%">Goal</div>`:''}
             </div>
             <div class="slider-scale-labels"><span>${min}${unit}</span><span>${max}${unit}</span></div>
@@ -693,7 +755,7 @@ function renderPoll(){
       const taId = `reflection-${a.id}`;
       return `
         <div class="q-block">
-          <div class="q-row"><div class="q-label">${item.question}</div></div>
+          <div class="q-row"><div class="q-label">${item.question}</div></div>${weekProgressHtml(a)}
           <textarea class="reflection-textarea" id="${taId}" placeholder="Type here…" oninput="answerReflection('${a.id}', this.value)">${existing||''}</textarea>
           <button class="mic-btn" id="${taId}-mic-btn" onclick="toggleMic('${taId}')" title="Voice input" style="margin-top:8px">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -730,6 +792,7 @@ function answerSlider(assignmentId, input, min, max, unit){
 function answerReflection(assignmentId, val){ ANSWERS[assignmentId] = val; checkSubmittable(); }
 
 function checkSubmittable(){
+  refreshWeekProgress();
   const allAnswered = ASSIGNMENTS.every(a => a.is_optional || (ANSWERS[a.id] !== undefined && ANSWERS[a.id] !== '' && ANSWERS[a.id] !== null));
   document.getElementById('submit-btn').disabled = !allAnswered;
 }

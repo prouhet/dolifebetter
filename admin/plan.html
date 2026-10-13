@@ -468,7 +468,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         </div>
       </div>
 
-      <button class="save-btn" onclick="assignItem()"><span id="save-btn-label">Assign to Jane</span></button>
+      <button class="save-btn" id="assign-save-btn" onclick="assignItem()"><span id="save-btn-label">Assign to Jane</span></button>
       <div class="cancel-link" onclick="showScreen('screen-plan')">Cancel</div>
       <div id="archive-did-row" class="hidden" style="text-align:center;font-size:12.5px;color:var(--care);cursor:pointer;padding-top:14px" onclick="archiveDid()">Archive this did — they're done with it</div>
     </div>
@@ -769,7 +769,7 @@ async function init(){
 function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : type === 'choice' ? '☰' : '#'; }
 
 function goalBadgeHtml(a){
-  if(a.type === 'numeric') return `<div class="assigned-goal">Goal ${a.goal}${a.unit}</div>`;
+  if(a.type === 'numeric') return a.goal != null ? `<div class="assigned-goal">Goal ${a.goal}${a.unit}</div>` : '';
   if(a.goalLabel) return `<div class="assigned-goal">Target ${a.goalLabel}</div>`;
   return '';
 }
@@ -899,7 +899,7 @@ function renderAssigned(){
           ${a.history.map(h => `
             <div class="history-row ${h.to === 'now' ? 'current' : ''}">
               <span>${h.from} – ${h.to}</span>
-              <span class="val">${h.goal}${a.unit}</span>
+              <span class="val">${h.goal != null ? h.goal + a.unit : 'no goal'}</span>
             </div>
           `).join('')}
         </div>
@@ -1280,7 +1280,18 @@ function startArchiveClient(){
   );
 }
 
-async function reactivateDid(assignmentId){
+// Same double-tap guard as the Assign screen: these two flows also insert a fresh
+// assignment row, and init() takes a couple of seconds, so a second tap in that window
+// would otherwise write a duplicate.
+let isWritingAssignment = false;
+async function withWriteLock(fn){
+  if(isWritingAssignment) return;
+  isWritingAssignment = true;
+  try { return await fn(); } finally { isWritingAssignment = false; }
+}
+
+function reactivateDid(assignmentId){ return withWriteLock(() => reactivateDidNow(assignmentId)); }
+async function reactivateDidNow(assignmentId){
   const a = archivedItems.find(x => x.assignmentId === assignmentId);
   if(!a) return;
   const today = localISO(new Date());
@@ -1424,7 +1435,8 @@ async function writeReviewLog(fields){
   })});
 }
 
-async function confirmResolvePrimary(){
+function confirmResolvePrimary(){ return withWriteLock(confirmResolvePrimaryNow); }
+async function confirmResolvePrimaryNow(){
   const { isGoalMet, a, hits } = resolveContext;
   const note = document.getElementById('resolve-primary-note').value.trim() || null;
   const today = localISO(new Date());
@@ -1903,13 +1915,26 @@ function stepWeekly(delta){
 }
 
 let isSavingAssignment = false; // guards against a double-tap creating two identical rows
+// The lock has to last until the Assign screen is actually gone. It used to be released
+// right after the save, before the slow init() reload finished — for those 2–3 seconds the
+// button was still live, and a second tap went through as a fresh insert (that's what made
+// the duplicate rows on Morgan, Darcy, Brady and Jen). So it also dims and ignores the button.
+function setAssignSaving(on){
+  isSavingAssignment = on;
+  const b = document.getElementById('assign-save-btn');
+  if(b){ b.style.opacity = on ? '.6' : ''; b.style.pointerEvents = on ? 'none' : ''; }
+}
 
 async function assignItem(){
   if(isSavingAssignment) return; // already in flight — ignore a second tap before this one finishes
-  isSavingAssignment = true;
+  setAssignSaving(true);
   const scheduleType = document.querySelector('#mode-toggle .mode-opt.selected').dataset.mode;
   const days = Array.from(document.querySelectorAll('.day-pick.on')).map(d => d.dataset.d);
-  const goal = pendingItem.type === 'numeric' ? parseInt(document.getElementById('goal-input').value || '0', 10) : null;
+  // A blank goal means "no goal" (null), not 0. A saved 0 draws a bogus "Goal" tick on the
+  // client's slider and prints "Goal 0" everywhere — and it's what a goal-less item like a
+  // 1–10 energy rating needs to be left blank. An explicitly typed 0 is still kept.
+  const goalRaw = pendingItem.type === 'numeric' ? parseInt(document.getElementById('goal-input').value, 10) : NaN;
+  const goal = Number.isNaN(goalRaw) ? null : goalRaw;
   const goalLabel = pendingItem.type === 'yesno' ? (document.getElementById('target-input').value.trim() || null) : null;
   const inputStyle = pendingItem.type === 'numeric' ? document.querySelector('#input-style-toggle .mode-opt.selected').dataset.style : null;
   if(inputStyle) lastInputStyle = inputStyle;
@@ -1955,16 +1980,19 @@ async function assignItem(){
       await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
     }
   } catch(e){
-    isSavingAssignment = false;
+    setAssignSaving(false);
     showToast('✗ Could not save — try again');
     return;
   }
   const wasEditing = !!editingAssignmentId;
   editingAssignmentId = null;
   pendingActionId = null;
-  isSavingAssignment = false;
-  await init();
-  showScreen('screen-plan');
+  try {
+    await init();
+    showScreen('screen-plan');
+  } finally {
+    setAssignSaving(false); // only now — the Assign screen is gone, so a late tap can't re-save
+  }
   showToast(wasEditing ? `✓ ${pendingItem.name} — changes saved` : `✓ ${pendingItem.name} assigned to ${CLIENT.name.split(' ')[0]}`);
 }
 

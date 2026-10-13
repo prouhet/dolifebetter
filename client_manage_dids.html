@@ -419,7 +419,7 @@ function renderMine(){
   myDids.forEach((a) => {
     const item = a.checkin_library_items;
     if(item.category !== lastCat){ html += `<div class="cat-header">${CATEGORY_EMOJI[item.category]||''} ${item.category}</div>`; lastCat = item.category; }
-    const meta = item.type === 'numeric' ? `Goal ${a.goal}${item.unit||''}` : a.goal_label ? `Target ${a.goal_label}` : 'Talk / type';
+    const meta = item.type === 'numeric' ? (a.goal != null ? `Goal ${a.goal}${item.unit||''}` : 'No goal set') : a.goal_label ? `Target ${a.goal_label}` : 'Talk / type';
     html += `<div class="did-row">
       <div style="display:flex;align-items:center;gap:13px;flex:1;min-width:0;cursor:pointer" onclick="openEdit('${a.id}')">
         <div class="did-icon ${item.type}">${typeIcon(item.type)}</div>
@@ -446,7 +446,7 @@ let pendingStop = null, pendingAdd = null, pendingEdit = null;
 function openStop(assignmentId){
   const a = myDids.find(x => x.id === assignmentId);
   const item = a.checkin_library_items;
-  const meta = item.type === 'numeric' ? `Goal ${a.goal}${item.unit||''}` : a.goal_label ? `Target ${a.goal_label}` : 'Talk / type';
+  const meta = item.type === 'numeric' ? (a.goal != null ? `Goal ${a.goal}${item.unit||''}` : 'No goal set') : a.goal_label ? `Target ${a.goal_label}` : 'Talk / type';
   pendingStop = a;
   document.getElementById('stop-item-name').textContent = item.name;
   document.getElementById('stop-item-meta').textContent = meta;
@@ -465,10 +465,10 @@ function openEdit(assignmentId){
   const valUnit = document.getElementById('edit-value-unit');
   const valLabel = document.getElementById('edit-value-label');
   if(item.type === 'numeric'){
-    document.getElementById('edit-item-meta').textContent = `Current goal: ${a.goal}${item.unit||''}`;
+    document.getElementById('edit-item-meta').textContent = a.goal != null ? `Current goal: ${a.goal}${item.unit||''}` : 'No goal set';
     valBlock.classList.remove('hidden');
     valLabel.textContent = "What would you like your goal to be?";
-    valInput.value = a.goal;
+    valInput.value = a.goal != null ? a.goal : '';
     valInput.type = 'number';
     valUnit.textContent = item.unit||'';
   } else if(a.goal_label){
@@ -590,7 +590,7 @@ async function sendRequest(kind){
     const valBlock = document.getElementById('edit-value-block');
     const proposed = !valBlock.classList.contains('hidden') ? document.getElementById('edit-value-input').value.trim() : '';
     payload.library_item_id = pendingEdit.checkin_library_items.id;
-    payload.from_value = pendingEdit.checkin_library_items.type === 'numeric' ? String(pendingEdit.goal) : (pendingEdit.goal_label || '');
+    payload.from_value = pendingEdit.checkin_library_items.type === 'numeric' ? (pendingEdit.goal != null ? String(pendingEdit.goal) : '') : (pendingEdit.goal_label || '');
     payload.to_value = proposed || null;
     title = 'Sent';
     sub = proposed
