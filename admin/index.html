@@ -1072,7 +1072,7 @@ function completeSignup(id){
     // only) — fall back to the plain checkbox picker, same as before.
     (s.requested_item_ids || []).forEach(didId => {
       const row = document.querySelector(`.did-check-row[data-did="${didId}"]`);
-      if(row && !row.classList.contains('selected')){ row.classList.add('selected'); selectedDids.push(didId); }
+      if(row && !row.classList.contains('selected')){ row.classList.add('selected'); if(!selectedDids.includes(didId)) selectedDids.push(didId); }
     });
   }
 }
@@ -1344,7 +1344,7 @@ function renderAddClientPicker(){
 function toggleDid(id){
   const row = document.querySelector(`.did-check-row[data-did="${id}"]`);
   const on = row.classList.toggle('selected');
-  if(on) selectedDids.push(id); else selectedDids = selectedDids.filter(d => d !== id);
+  if(on){ if(!selectedDids.includes(id)) selectedDids.push(id); } else selectedDids = selectedDids.filter(d => d !== id);
 }
 function toggleActionSelect(id){
   const row = document.querySelector(`.did-check-row[data-action="${id}"]`);
@@ -1463,7 +1463,13 @@ function dismissClientLink(){
   if(goTo === 'roster'){ openRoster(currentTrainerId, false); } else { showScreen('screen-master'); }
 }
 
+let isAddingClient = false; // a double-tap on "Add client" would otherwise create the client twice
 async function addClient(){
+  if(isAddingClient) return;
+  isAddingClient = true;
+  try { await _addClient(); } finally { isAddingClient = false; }
+}
+async function _addClient(){
   const name = document.getElementById('new-client-name').value.trim();
   if(!name) return;
   const fromRoster = !document.getElementById('trainer-locked-block').classList.contains('hidden');
@@ -1502,7 +1508,9 @@ async function addClient(){
       await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(assignmentRows)});
     } catch(e){ /* client itself was created fine — dids can be added by hand if this fails */ }
   } else if(selectedDids.length){
-    const assignmentRows = selectedDids.map(itemId => ({
+    // A did listed twice would create two identical live rows for the same client
+    // (the client would be asked the same question twice) — de-duplicate first.
+    const assignmentRows = [...new Set(selectedDids)].map(itemId => ({
       client_id: newClient.id, library_item_id: itemId,
       schedule_type: 'days', days: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
     }));

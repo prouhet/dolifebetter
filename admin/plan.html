@@ -348,7 +348,8 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <div class="mode-opt" data-org="">All orgs</div>
         </div>
         <div class="config-label">Category</div>
-        <input type="text" id="new-item-category" placeholder="e.g. Move, Exercise, Nutrition" style="width:100%;padding:11px 13px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);margin-bottom:14px;outline:none">
+        <input type="text" id="new-item-category" list="new-item-category-suggestions" placeholder="e.g. Move, Exercise, Nutrition" style="width:100%;padding:11px 13px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);margin-bottom:14px;outline:none">
+        <datalist id="new-item-category-suggestions"></datalist>
         <div class="config-label">Name</div>
         <input type="text" id="new-item-name" placeholder="e.g. Evening walk" style="width:100%;padding:11px 13px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);margin-bottom:14px;outline:none">
         <div class="config-label">Type</div>
@@ -468,7 +469,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         </div>
       </div>
 
-      <button class="save-btn" id="assign-save-btn" onclick="assignItem()"><span id="save-btn-label">Assign to Jane</span></button>
+      <button class="save-btn" onclick="assignItem()"><span id="save-btn-label">Assign to Jane</span></button>
       <div class="cancel-link" onclick="showScreen('screen-plan')">Cancel</div>
       <div id="archive-did-row" class="hidden" style="text-align:center;font-size:12.5px;color:var(--care);cursor:pointer;padding-top:14px" onclick="archiveDid()">Archive this did — they're done with it</div>
     </div>
@@ -769,7 +770,7 @@ async function init(){
 function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : type === 'choice' ? '☰' : '#'; }
 
 function goalBadgeHtml(a){
-  if(a.type === 'numeric') return a.goal != null ? `<div class="assigned-goal">Goal ${a.goal}${a.unit}</div>` : '';
+  if(a.type === 'numeric') return `<div class="assigned-goal">Goal ${a.goal}${a.unit}</div>`;
   if(a.goalLabel) return `<div class="assigned-goal">Target ${a.goalLabel}</div>`;
   return '';
 }
@@ -899,7 +900,7 @@ function renderAssigned(){
           ${a.history.map(h => `
             <div class="history-row ${h.to === 'now' ? 'current' : ''}">
               <span>${h.from} – ${h.to}</span>
-              <span class="val">${h.goal != null ? h.goal + a.unit : 'no goal'}</span>
+              <span class="val">${h.goal}${a.unit}</span>
             </div>
           `).join('')}
         </div>
@@ -1280,20 +1281,13 @@ function startArchiveClient(){
   );
 }
 
-// Same double-tap guard as the Assign screen: these two flows also insert a fresh
-// assignment row, and init() takes a couple of seconds, so a second tap in that window
-// would otherwise write a duplicate.
-let isWritingAssignment = false;
-async function withWriteLock(fn){
-  if(isWritingAssignment) return;
-  isWritingAssignment = true;
-  try { return await fn(); } finally { isWritingAssignment = false; }
-}
-
-function reactivateDid(assignmentId){ return withWriteLock(() => reactivateDidNow(assignmentId)); }
-async function reactivateDidNow(assignmentId){
+function reactivateDid(assignmentId){ return guardedWrite(() => _reactivateDid(assignmentId)); }
+async function _reactivateDid(assignmentId){
   const a = archivedItems.find(x => x.assignmentId === assignmentId);
   if(!a) return;
+  // If this did is already live again (a second tap, or it was re-added by hand),
+  // reactivating would open a second row for it — refuse instead.
+  if(assigned.some(x => x.libId === a.libId)){ showToast('Already active'); return; }
   const today = localISO(new Date());
   try {
     await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({
@@ -1335,7 +1329,8 @@ async function moveDid(assignmentId, direction){
   await init();
 }
 
-async function archiveDid(assignmentId){
+function archiveDid(assignmentId){ return guardedWrite(() => _archiveDid(assignmentId)); }
+async function _archiveDid(assignmentId){
   const id = assignmentId || editingAssignmentId;
   const a = assigned.find(x => x.assignmentId === id);
   if(!a) return;
@@ -1435,8 +1430,8 @@ async function writeReviewLog(fields){
   })});
 }
 
-function confirmResolvePrimary(){ return withWriteLock(confirmResolvePrimaryNow); }
-async function confirmResolvePrimaryNow(){
+function confirmResolvePrimary(){ return guardedWrite(_confirmResolvePrimary); }
+async function _confirmResolvePrimary(){
   const { isGoalMet, a, hits } = resolveContext;
   const note = document.getElementById('resolve-primary-note').value.trim() || null;
   const today = localISO(new Date());
@@ -1468,7 +1463,8 @@ async function confirmResolvePrimaryNow(){
   }
 }
 
-async function confirmResolveSecondary(){
+function confirmResolveSecondary(){ return guardedWrite(_confirmResolveSecondary); }
+async function _confirmResolveSecondary(){
   const { isGoalMet, a } = resolveContext;
   const note = document.getElementById('resolve-secondary-note').value.trim() || null;
   const newTarget = parseInt(document.getElementById('resolve-secondary-number').value, 10);
@@ -1541,7 +1537,8 @@ function openSwapPicker(){
   showScreen('screen-swap-pick');
 }
 
-async function swapToItem(newLibId, newActionId){
+function swapToItem(newLibId, newActionId){ return guardedWrite(() => _swapToItem(newLibId, newActionId)); }
+async function _swapToItem(newLibId, newActionId){
   const old = assigned.find(x => x.assignmentId === resolvingAssignmentId);
   const today = localISO(new Date());
   try {
@@ -1610,15 +1607,29 @@ function openPicker(){
   showScreen('screen-pick');
 }
 
+function updateNewItemCategorySuggestions(orgId){
+  // Scoped to whichever org is selected — shared items count toward every org's
+  // list too, since a shared category is a real option no matter which org you're
+  // creating for. Saves retyping "Nutrition" from scratch every single time.
+  const relevant = orgId ? LIBRARY.filter(i => i.orgId === orgId || !i.orgId) : LIBRARY;
+  const categories = [...new Set(relevant.map(i => i.category).filter(Boolean))].sort();
+  document.getElementById('new-item-category-suggestions').innerHTML = categories.map(c => `<option value="${c}">`).join('');
+}
+
 function toggleNewItemForm(){
   const form = document.getElementById('new-item-form');
   const isHidden = form.classList.contains('hidden');
   form.classList.toggle('hidden');
   document.getElementById('new-item-toggle').textContent = isHidden ? '− Cancel new item' : '+ Create a new item';
+  if(isHidden){
+    const selectedOrgId = document.querySelector('#new-item-org .mode-opt.selected')?.dataset.org || '';
+    updateNewItemCategorySuggestions(selectedOrgId);
+  }
 }
 document.getElementById('new-item-org').addEventListener('click', e => {
   const opt = e.target.closest('.mode-opt'); if(!opt) return;
   document.querySelectorAll('#new-item-org .mode-opt').forEach(o => o.classList.toggle('selected', o===opt));
+  updateNewItemCategorySuggestions(opt.dataset.org || '');
 });
 document.getElementById('new-item-type').addEventListener('click', e => {
   const opt = e.target.closest('.mode-opt'); if(!opt) return;
@@ -1746,8 +1757,11 @@ function pickItem(id, actionId){
   document.getElementById('goal-unit').textContent = pendingItem.unit || '';
   document.getElementById('goal-input').value = '';
   document.getElementById('target-input').value = '';
-  document.getElementById('consistency-days-input').value = '';
-  document.getElementById('review-after-input').value = '';
+  // Real values, not just placeholder hints — these ARE what gets saved if left
+  // untouched, so showing them as confirmed numbers (not grey example text)
+  // removes any doubt about whether a default actually took effect.
+  document.getElementById('consistency-days-input').value = '12';
+  document.getElementById('review-after-input').value = '21';
   document.getElementById('consistency-progress-display').classList.add('hidden');
   document.getElementById('recheck-date-display').classList.add('hidden');
   populateConfigContext(pendingItem, pendingActionId);
@@ -1914,27 +1928,33 @@ function stepWeekly(delta){
   document.getElementById('weekly-val').textContent = weeklyCount;
 }
 
-let isSavingAssignment = false; // guards against a double-tap creating two identical rows
-// The lock has to last until the Assign screen is actually gone. It used to be released
-// right after the save, before the slow init() reload finished — for those 2–3 seconds the
-// button was still live, and a second tap went through as a fresh insert (that's what made
-// the duplicate rows on Morgan, Darcy, Brady and Jen). So it also dims and ignores the button.
-function setAssignSaving(on){
-  isSavingAssignment = on;
-  const b = document.getElementById('assign-save-btn');
-  if(b){ b.style.opacity = on ? '.6' : ''; b.style.pointerEvents = on ? 'none' : ''; }
+// One shared in-flight lock for every write on this page that creates, closes or
+// replaces an assignment row. The lock is held until the write has finished AND
+// the plan has reloaded and the screen has switched — the reload is the slow part
+// on a phone, and a second tap landing during it is exactly how a duplicate row
+// used to get created (the first save had already cleared "editing", so the
+// second tap was treated as a brand-new assignment).
+let isWriting = false;
+async function guardedWrite(fn){
+  if(isWriting) return; // something is already in flight — ignore this tap
+  isWriting = true;
+  try { await fn(); } finally { isWriting = false; }
 }
 
-async function assignItem(){
-  if(isSavingAssignment) return; // already in flight — ignore a second tap before this one finishes
-  setAssignSaving(true);
+function assignItem(){ return guardedWrite(_assignItem); }
+
+async function _assignItem(){
+  // Never open a second live row for a did this client already has. The picker
+  // already routes existing dids to "edit", so this only catches a stale screen
+  // or a tap race — but a duplicate row means the client gets asked the same
+  // question twice and saves two answers, so it's refused outright.
+  if(!editingAssignmentId && assigned.some(a => a.libId === pendingItem.id)){
+    showToast('Already assigned — tap it in the plan to edit');
+    return;
+  }
   const scheduleType = document.querySelector('#mode-toggle .mode-opt.selected').dataset.mode;
   const days = Array.from(document.querySelectorAll('.day-pick.on')).map(d => d.dataset.d);
-  // A blank goal means "no goal" (null), not 0. A saved 0 draws a bogus "Goal" tick on the
-  // client's slider and prints "Goal 0" everywhere — and it's what a goal-less item like a
-  // 1–10 energy rating needs to be left blank. An explicitly typed 0 is still kept.
-  const goalRaw = pendingItem.type === 'numeric' ? parseInt(document.getElementById('goal-input').value, 10) : NaN;
-  const goal = Number.isNaN(goalRaw) ? null : goalRaw;
+  const goal = pendingItem.type === 'numeric' ? parseInt(document.getElementById('goal-input').value || '0', 10) : null;
   const goalLabel = pendingItem.type === 'yesno' ? (document.getElementById('target-input').value.trim() || null) : null;
   const inputStyle = pendingItem.type === 'numeric' ? document.querySelector('#input-style-toggle .mode-opt.selected').dataset.style : null;
   if(inputStyle) lastInputStyle = inputStyle;
@@ -1980,19 +2000,14 @@ async function assignItem(){
       await sbReq('checkin_assignments', {method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify(payload)});
     }
   } catch(e){
-    setAssignSaving(false);
     showToast('✗ Could not save — try again');
     return;
   }
   const wasEditing = !!editingAssignmentId;
   editingAssignmentId = null;
   pendingActionId = null;
-  try {
-    await init();
-    showScreen('screen-plan');
-  } finally {
-    setAssignSaving(false); // only now — the Assign screen is gone, so a late tap can't re-save
-  }
+  await init();
+  showScreen('screen-plan');
   showToast(wasEditing ? `✓ ${pendingItem.name} — changes saved` : `✓ ${pendingItem.name} assigned to ${CLIENT.name.split(' ')[0]}`);
 }
 
