@@ -491,11 +491,16 @@ async function submitVerify(){
     }
   }
 }
-// ─── Weekly progress ("2 of 3 this week") ────────────────────────────────
-// Shown only for items scheduled "times per week". The week starts on Sunday.
-// Nothing caps the count: a client can log more than the goal, and the line says so
-// ("4 this week · goal 3") instead of showing a negative number remaining.
+// ─── Weekly progress ("2 of 5 this week") ────────────────────────────────
+// Every item gets a line under its question, so the client always sees what the week asks of them:
+//   · "Times per week" items:     "2 of 5 this week"
+//   · Specific days (Mon/Wed/Fri): "1 of 3 this week (M, W, F)"
+//   · Every day:                   "3 of 7 this week"
+// The week starts on Sunday. Nothing caps the count: a client can log more than the goal, and
+// the line says so ("6 this week · goal 5 ✓") instead of showing a negative number remaining.
 let WEEK_PRIOR = {}; // assignment id → how many earlier days this week count
+const WEEK_ORDER = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const DAY_ABBR = {Sun:'Su', Mon:'M', Tue:'Tu', Wed:'W', Thu:'Th', Fri:'F', Sat:'Sa'};
 
 function weekStartISO(){
   const d = new Date(); d.setHours(0,0,0,0);
@@ -510,14 +515,14 @@ function countsTowardWeek(item, value){
 }
 async function loadWeekProgress(){
   WEEK_PRIOR = {};
-  const weekly = (allAssignments||[]).filter(a => a.schedule_type === 'weekly' && a.weekly_count && a.checkin_library_items);
+  const shown = (ASSIGNMENTS||[]).filter(a => a.checkin_library_items);
   const start = weekStartISO(), today = todayISO();
-  if(!weekly.length || start >= today) return; // none to show, or it's Sunday — nothing earlier this week yet
+  if(!shown.length || start >= today) return; // nothing to show, or it's Sunday — nothing earlier this week yet
   let rows = [];
   try {
     rows = await sbReq(`checkin_responses?select=library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT.id}&checkin_daily.checkin_date=gte.${start}&checkin_daily.checkin_date=lt.${today}`);
   } catch(e){ return; } // if this fails the line just counts from today — never block the check-in
-  weekly.forEach(a => {
+  shown.forEach(a => {
     const days = new Set();
     (rows||[]).forEach(r => {
       if(r.library_item_id === a.checkin_library_items.id && countsTowardWeek(a.checkin_library_items, r.value)){
@@ -527,15 +532,25 @@ async function loadWeekProgress(){
     WEEK_PRIOR[a.id] = days.size;
   });
 }
+// What the week asks for: {goal, label}. label is the list of days when it's a fixed set of
+// days, and empty for "every day" and "times per week".
+function weekTarget(a){
+  if(a.schedule_type === 'weekly') return a.weekly_count ? {goal: a.weekly_count, label: ''} : null;
+  const set = new Set(a.days || []);
+  const days = WEEK_ORDER.filter(d => set.has(d));
+  if(!days.length) return null;
+  return {goal: days.length, label: days.length === 7 ? '' : ` (${days.map(d => DAY_ABBR[d]).join(', ')})`};
+}
 // Earlier days this week + today's answer as it stands on screen (so it updates live).
 function weekProgress(a){
-  if(a.schedule_type !== 'weekly' || !a.weekly_count) return null;
   if(isBackfillMode) return null; // logging yesterday: it may belong to last week, so don't show a count
+  const t = weekTarget(a);
+  if(!t) return null;
   const n = (WEEK_PRIOR[a.id] || 0) + (countsTowardWeek(a.checkin_library_items, ANSWERS[a.id]) ? 1 : 0);
-  const goal = a.weekly_count;
-  if(n < goal) return {text: `${n} of ${goal} this week`, done: false};
-  if(n === goal) return {text: `${n} of ${goal} this week ✓`, done: true};
-  return {text: `${n} this week · goal ${goal} ✓`, done: true};
+  const fixedDays = a.schedule_type !== 'weekly';
+  if(n < t.goal) return {text: `${n} of ${t.goal} this week${t.label}`, done: false};
+  if(n === t.goal) return {text: `${n} of ${t.goal} this week${t.label} ✓`, done: true};
+  return {text: fixedDays ? `${n} this week${t.label} ✓` : `${n} this week · goal ${t.goal} ✓`, done: true};
 }
 function weekProgressHtml(a){
   const p = weekProgress(a);
@@ -708,6 +723,7 @@ function renderPoll(){
             <div class="pill ${existing==='yes'?'selected':''}" data-val="yes" onclick="answerYesNo('${a.id}','yes')">Yes</div>
             <div class="pill ${existing==='no'?'selected':''}" data-val="no" onclick="answerYesNo('${a.id}','no')">No</div>
           </div>
+          ${a.goal_label ? `<div class="textbox-goal-hint">Target: <b>${String(a.goal_label).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}</b></div>` : ''}
         </div>`;
     } else if(item.type === 'choice'){
       const opts = item.choices || [];
@@ -749,6 +765,7 @@ function renderPoll(){
               ${goalPct!=null ? `<div class="goal-marker" style="left:${goalPct}%"></div><div class="goal-marker-label" style="left:${goalPct}%">Goal</div>`:''}
             </div>
             <div class="slider-scale-labels"><span>${min}${unit}</span><span>${max}${unit}</span></div>
+            ${goal!=null ? `<div class="textbox-goal-hint">Goal: <b>${goal}${unit}</b></div>` : ''}
           </div>`;
       }
     } else {
