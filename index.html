@@ -44,6 +44,15 @@ body{background:var(--bg);color:var(--ink);font-family:'DM Sans',sans-serif;min-
 .q-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px}
 .week-progress{font-size:12.5px;font-weight:600;color:var(--ink-faint);margin:-6px 0 12px}
 .week-progress.done{color:var(--teal-deep)}
+.reorder-bar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin:-8px 0 14px}
+.reorder-note{font-size:12.5px;line-height:1.4;color:var(--ink-faint);padding-top:3px}
+.reorder-link{font-family:inherit;font-size:13px;font-weight:600;color:var(--teal-deep);background:none;border:none;cursor:pointer;padding:3px 0;margin-left:auto;white-space:nowrap}
+.reorder-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;background:var(--surface);border:1px solid var(--surface-soft);box-shadow:var(--shadow-sm);margin-bottom:9px}
+.reorder-name{flex:1;min-width:0;font-size:14.5px;font-weight:600;line-height:1.35}
+.move-btns{display:flex;gap:4px;flex-shrink:0}
+.move-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--surface-soft);background:var(--surface-soft);color:var(--ink-dim);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s ease;font-family:inherit}
+.move-btn:active:not(:disabled){transform:scale(.9)}
+.move-btn:disabled{opacity:.3;cursor:default}
 .q-label{font-size:15px;font-weight:500;line-height:1.4;letter-spacing:-.005em}
 
 .pill-row{display:flex;gap:10px}
@@ -193,6 +202,10 @@ input[type=range].slider::-moz-range-track{height:6px;border-radius:4px;backgrou
     <div class="greeting" id="poll-greeting"></div>
     <div class="subline" id="poll-subline">How are you doing today?</div>
 
+    <div id="reorder-bar" class="reorder-bar hidden">
+      <div id="reorder-note" class="reorder-note"></div>
+      <button id="reorder-toggle" class="reorder-link" onclick="toggleReorder()">↕ Change the order</button>
+    </div>
     <div id="poll-questions"></div>
 
     <div id="normal-day-actions">
@@ -421,6 +434,10 @@ let currentDailyNote = null; // today's tough-day note, if any — kept global s
 let allAssignments = null; // every active assignment, unfiltered by today's schedule — needed to scan for uncelebrated goals regardless of what's due today
 let pendingCelebrationId = null; // the assignment currently being celebrated, so dismissCelebration() knows which one to mark done
 let YESTERDAY_ASSIGNMENTS = []; // what would have been due yesterday, for the "forgot to log" backfill flow
+let FULL_ORDER = [];       // every active assignment in check-in order, including ones not due today
+let SAVED_ORDER = {};      // assignment id → sort_order as last saved
+let LOAD_INDEX = {};       // assignment id → position when the page loaded (breaks ties for items with no sort_order)
+let isReorderMode = false; // the client is rearranging their list
 let isBackfillMode = false; // true while ASSIGNMENTS/ANSWERS have been swapped to represent yesterday instead of today
 let isSubmitting = false; // a second tap on Check In while a save is already in flight is ignored here, not duplicated
 let isRestDay = false;
@@ -563,7 +580,71 @@ function refreshWeekProgress(){
   });
 }
 
+// ─── Reordering the list ────────────────────────────────────────────────
+// The order is the assignment's sort_order — the same one the trainer's plan screen and the
+// "My dids" page use. The check-in only shows what's due today, so a move swaps places with the
+// neighbour the client can see, in the full list that also holds today's hidden items; that
+// leaves every hidden item exactly where it was relative to the rest.
+const byOrder = (a, b) => (a.sort_order ?? 999999) - (b.sort_order ?? 999999);
+const ARROW_UP = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>';
+const ARROW_DOWN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+let reorderNote = '';
+function updateReorderBar(){
+  // Not while previewing (nothing may be written), not while logging yesterday, and not with only one item.
+  const can = !PREVIEW_MODE && !isBackfillMode && ASSIGNMENTS.length >= 2;
+  if(!can) isReorderMode = false;
+  document.getElementById('reorder-bar').classList.toggle('hidden', !can);
+  document.getElementById('reorder-toggle').textContent = isReorderMode ? 'Done' : '↕ Change the order';
+  document.getElementById('reorder-note').textContent = isReorderMode
+    ? (reorderNote || 'Use the arrows to move a question up or down. This is the order you\'ll see from now on.') : '';
+}
+function toggleReorder(){
+  isReorderMode = !isReorderMode;
+  reorderNote = '';
+  renderPoll();
+}
+let reorderSaveChain = Promise.resolve();
+let reorderGen = 0; // bumped when a save fails, so anything still queued behind it is dropped
+function moveToday(assignmentId, direction){
+  const i = ASSIGNMENTS.findIndex(a => a.id === assignmentId), j = i + direction;
+  if(i < 0 || j < 0 || j >= ASSIGNMENTS.length) return;
+  const fi = FULL_ORDER.indexOf(ASSIGNMENTS[i]), fj = FULL_ORDER.indexOf(ASSIGNMENTS[j]);
+  if(fi < 0 || fj < 0) return;
+  [FULL_ORDER[fi], FULL_ORDER[fj]] = [FULL_ORDER[fj], FULL_ORDER[fi]];
+  [ASSIGNMENTS[i], ASSIGNMENTS[j]] = [ASSIGNMENTS[j], ASSIGNMENTS[i]];
+  const wanted = FULL_ORDER.map((a, idx) => ({id: a.id, order: (idx + 1) * 10}));
+  FULL_ORDER.forEach((a, idx) => { a.sort_order = wanted[idx].order; });
+  YESTERDAY_ASSIGNMENTS.sort(byOrder);
+  reorderNote = '';
+  renderPoll();
+  const gen = reorderGen;
+  reorderSaveChain = reorderSaveChain.then(() => gen === reorderGen ? saveOrder(wanted) : null);
+}
+async function saveOrder(wanted){
+  const changed = wanted.filter(w => SAVED_ORDER[w.id] !== w.order); // only rows whose position changed
+  if(!changed.length) return;
+  try {
+    await Promise.all(changed.map(w =>
+      sbReq(`checkin_assignments?id=eq.${w.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({sort_order: w.order})})
+        .then(() => { SAVED_ORDER[w.id] = w.order; })
+    ));
+    reorderNote = 'Saved — this is the order you\'ll see from now on.';
+  } catch(e){
+    reorderGen++; // drop any saves queued behind this one
+    // Put the list back to whatever is actually saved (some of the writes may have gone through).
+    const key = a => [SAVED_ORDER[a.id] ?? 999999, LOAD_INDEX[a.id] ?? 0];
+    const cmp = (x, y) => { const kx = key(x), ky = key(y); return (kx[0] - ky[0]) || (kx[1] - ky[1]); };
+    (allAssignments||[]).forEach(a => { a.sort_order = SAVED_ORDER[a.id]; });
+    FULL_ORDER.sort(cmp); ASSIGNMENTS.sort(cmp); YESTERDAY_ASSIGNMENTS.sort(cmp);
+    reorderNote = "Couldn't save that change — check your connection. Showing your saved order.";
+    renderPoll();
+    return;
+  }
+  updateReorderBar();
+}
+
 async function continueAfterVerify(){
+  isReorderMode = false; reorderNote = ''; // a fresh load never starts mid-reorder
   const trainerFirst = (CLIENT.checkin_trainers?.name || 'your trainer').split(' ')[0];
   document.querySelectorAll('#trainer-name-inline, #trainer-name-inline-2, #trainer-name-inline-nothing').forEach(el => el.textContent = trainerFirst);
 
@@ -580,6 +661,9 @@ async function continueAfterVerify(){
   const yesterdayDow = DOW_SHORT[yesterday.getDay()];
   YESTERDAY_ASSIGNMENTS = (allAssignments||[]).filter(a => a.schedule_type === 'weekly' || (a.days||[]).includes(yesterdayDow));
   YESTERDAY_ASSIGNMENTS.sort((a, b) => (a.sort_order ?? 999999) - (b.sort_order ?? 999999));
+  FULL_ORDER = [...(allAssignments||[])].sort(byOrder);
+  SAVED_ORDER = Object.fromEntries((allAssignments||[]).map(a => [a.id, a.sort_order]));
+  LOAD_INDEX = Object.fromEntries(FULL_ORDER.map((a, i) => [a.id, i]));
   let yesterdayAlreadyLogged = true;
   if(YESTERDAY_ASSIGNMENTS.length){
     try {
@@ -708,10 +792,25 @@ function renderPoll(){
     container.innerHTML = `<div class="q-block"><div class="q-label" style="color:var(--ink-faint)">Nothing to check in on today — enjoy the day off.</div></div>`;
     document.getElementById('normal-day-actions').classList.add('hidden');
     document.getElementById('nothing-today-actions').classList.remove('hidden');
+    updateReorderBar();
     return;
   }
-  document.getElementById('normal-day-actions').classList.remove('hidden');
+  updateReorderBar();
+  document.getElementById('normal-day-actions').classList.toggle('hidden', isReorderMode);
   document.getElementById('nothing-today-actions').classList.add('hidden');
+  if(isReorderMode){
+    // A compact list instead of the live questions: just the wording and the arrows. Answers
+    // already given stay in ANSWERS and come straight back when they tap Done.
+    container.innerHTML = ASSIGNMENTS.map((a, idx) => `
+      <div class="reorder-row">
+        <div class="reorder-name">${a.checkin_library_items.question}</div>
+        <div class="move-btns">
+          <button class="move-btn" aria-label="Move up" onclick="moveToday('${a.id}', -1)" ${idx===0?'disabled':''}>${ARROW_UP}</button>
+          <button class="move-btn" aria-label="Move down" onclick="moveToday('${a.id}', 1)" ${idx===ASSIGNMENTS.length-1?'disabled':''}>${ARROW_DOWN}</button>
+        </div>
+      </div>`).join('');
+    return;
+  }
   container.innerHTML = ASSIGNMENTS.map(a => {
     const item = a.checkin_library_items;
     const existing = ANSWERS[a.id];
