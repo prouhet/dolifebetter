@@ -150,6 +150,38 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
 const SBH = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` };
+
+// ─── Sign-in session (security update, Oct 2026) ──────────────────────────
+// Codes and PINs are checked by the database now, never in the browser. A good
+// sign-in returns a session key that this device keeps (localStorage) and sends
+// with every request as x-dids-session; without it the database shares nothing.
+const DIDS_AUTH = {
+  key(kind, token){ return `dids_${kind}_session_${token}`; },
+  get(kind, token){ try { return localStorage.getItem(this.key(kind, token)); } catch(e){ return null; } },
+  set(kind, token, s){ try { localStorage.setItem(this.key(kind, token), s); } catch(e){} },
+  clear(kind, token){ try { localStorage.removeItem(this.key(kind, token)); } catch(e){} },
+  trainerSessions(){
+    const out = [];
+    try { for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.startsWith('dids_trainer_session_')) out.push(localStorage.getItem(k)); } } catch(e){}
+    return out.filter(Boolean);
+  },
+  use(s){ if(s) SBH['x-dids-session'] = s; else delete SBH['x-dids-session']; },
+  async rpc(name, args){
+    const r = await fetch(`${SB_URL}/rest/v1/rpc/${name}`, { method: 'POST', headers: { ...SBH, 'Content-Type': 'application/json' }, body: JSON.stringify(args || {}) });
+    if(!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+  // Resume a saved session: returns the dids_me() result, or null if none of them is still valid
+  async resume(candidates, accept){
+    for(const s of candidates){
+      if(!s) continue;
+      this.use(s);
+      try { const me = await this.rpc('dids_me'); if(me && me.ok && accept(me)) return me; } catch(e){}
+    }
+    this.use(null);
+    return null;
+  }
+};
 async function sbReq(path){
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers: SBH });
   if(!r.ok) throw new Error(await r.text());
@@ -190,27 +222,38 @@ function showScreen(id){
   ['screen-verify','screen-stats'].forEach(s => document.getElementById(s).classList.toggle('hidden', s !== id));
 }
 
+let CLIENT_ME = null; // who the database says is signed in
 async function init(){
   if(!CLIENT_TOKEN){ window.location.href = 'get-started.html'; return; }
-  let rows;
-  try {
-    rows = await sbReq(`checkin_clients?select=id,name,token,phone,pin,checkin_trainers(name)&token=eq.${encodeURIComponent(CLIENT_TOKEN)}`);
-  } catch(e){ window.location.href = 'get-started.html'; return; }
-  if(!rows || !rows.length){ window.location.href = 'get-started.html'; return; }
-  CLIENT = rows[0];
-
-  const trainerFirst = (CLIENT.checkin_trainers?.name || 'your trainer').split(' ')[0];
-  document.getElementById('verify-stuck-name').textContent = trainerFirst;
   document.getElementById('manage-link').href = `client_manage_dids.html?id=${CLIENT_TOKEN}`;
 
-  // Same one-time per-device check as the daily check-in page — same localStorage key,
-  // so verifying once on either page covers both automatically.
-  if(!isVerifiedOnThisDevice()){
-    document.getElementById('verify-greeting').textContent = `Hey ${CLIENT.name.split(' ')[0]} 👋`;
+  // Same one-time sign-in and saved session as the daily check-in page, so signing in
+  // on either page covers both automatically. The database checks the code.
+  CLIENT_ME = await DIDS_AUTH.resume([DIDS_AUTH.get('client', CLIENT_TOKEN)], me => me.kind === 'client' && me.client.token === CLIENT_TOKEN);
+  if(!CLIENT_ME){
+    DIDS_AUTH.clear('client', CLIENT_TOKEN);
+    let hello = null;
+    try { hello = await DIDS_AUTH.rpc('dids_client_hello', { p_token: CLIENT_TOKEN }); } catch(e){ window.location.href = 'get-started.html'; return; }
+    if(!hello || !hello.ok){ window.location.href = 'get-started.html'; return; }
+    document.getElementById('verify-stuck-name').textContent = (hello.trainer_name || 'your trainer').split(' ')[0];
+    document.getElementById('verify-greeting').textContent = `Hey ${(hello.name || '').split(' ')[0]} 👋`;
     showScreen('screen-verify');
     return;
   }
+  if(!(await loadSignedInClient())) return;
   await continueAfterVerify();
+}
+
+async function loadSignedInClient(){
+  let rows;
+  try {
+    rows = await sbReq(`checkin_clients?select=id,name,token,phone&token=eq.${encodeURIComponent(CLIENT_TOKEN)}`);
+  } catch(e){ window.location.href = 'get-started.html'; return false; }
+  if(!rows || !rows.length){ window.location.href = 'get-started.html'; return false; }
+  CLIENT = rows[0];
+  // Clients can't read the trainers table directly; their trainer's name comes with the session
+  CLIENT.checkin_trainers = (CLIENT_ME && CLIENT_ME.trainer) ? { name: CLIENT_ME.trainer.name } : null;
+  return true;
 }
 
 function isVerifiedOnThisDevice(){
@@ -230,18 +273,34 @@ function checkVerifyValid(){
 }
 async function submitVerify(){
   const entered = document.getElementById('verify-input').value.trim();
-  const correctPin = CLIENT.pin || last4(CLIENT.phone);
-  if(entered === correctPin){
+  document.getElementById('verify-btn').disabled = true;
+  let res = null;
+  try { res = await DIDS_AUTH.rpc('dids_client_login', { p_token: CLIENT_TOKEN, p_code: entered }); }
+  catch(e){ alert('Could not reach the server — check your connection and try again.'); document.getElementById('verify-btn').disabled = false; return; }
+  if(res && res.ok){
+    DIDS_AUTH.set('client', CLIENT_TOKEN, res.session);
+    DIDS_AUTH.use(res.session);
+    CLIENT_ME = res;
     markVerifiedOnThisDevice();
+    if(!(await loadSignedInClient())) return;
     showScreen('screen-stats');
     await continueAfterVerify();
   } else {
     verifyFailCount++;
+    if(res && res.error === 'too_many_attempts') verifyFailCount = Math.max(verifyFailCount, 3);
     document.getElementById('verify-error').classList.remove('hidden');
     document.getElementById('verify-input').value = '';
     document.getElementById('verify-btn').disabled = true;
     if(verifyFailCount >= 3) document.getElementById('verify-stuck').classList.remove('hidden');
   }
+}
+
+// Was called by the ended-dids list but never defined, so the whole Stats screen failed
+// to render for any client with a did that had ended. Same format as the manage page.
+function fmtDate(iso){
+  if(!iso) return 'now';
+  const d = new Date(String(iso).slice(0, 10) + 'T12:00:00');
+  return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
 }
 
 function buildDateWindow(){
