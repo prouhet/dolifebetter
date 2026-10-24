@@ -347,10 +347,9 @@ const DIDS_AUTH = {
   }
 };
 
-// ─── Voice input — same mechanism as capture.html, pointed at the ───────────
-// scoped CHECKIN_VOICE_KEY instead of a real brainKey (that key only unlocks
-// /transcribe, nothing else — safe to embed in a public client-facing page).
-const CHECKIN_VOICE_KEY = "53bd219ac2f1d35e229f27e17312f3e0f716b0b6";
+// ─── Voice input — same mechanism as capture.html. Since Oct 2026 the ──────
+// signed-in session (x-dids-session) is what lets a client use /transcribe,
+// so no voice key is embedded in this page.
 let mediaRecorder = null, audioChunks = [], isRecording = false;
 
 function getBestMimeType(){
@@ -400,8 +399,9 @@ async function toggleMic(targetId){
     micBtn.classList.add('processing');
     try {
       const res = await fetch(
-        `${SB_URL}/functions/v1/transcribe?key=${encodeURIComponent(CHECKIN_VOICE_KEY)}`,
-        { method:'POST', headers:{ 'Content-Type': actualMime }, body: blob }
+        `${SB_URL}/functions/v1/transcribe`,
+        // The signed-in session is the pass — no voice key in the page any more
+        { method:'POST', headers:{ 'Content-Type': actualMime, 'x-dids-session': SBH['x-dids-session'] || '' }, body: blob }
       );
       if(!res.ok){ throw new Error('Transcribe ' + res.status); }
       const data = await res.json();
