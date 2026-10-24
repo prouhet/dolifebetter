@@ -314,7 +314,6 @@ async function sbReq(path, opts = {}) {
   const text = await r.text();
   return text ? JSON.parse(text) : null;
 }
-const CHECKIN_VOICE_KEY = "53bd219ac2f1d35e229f27e17312f3e0f716b0b6";
 const CATEGORY_EMOJI = { Sleep:'🌙', Food:'🍎', Move:'🏃', Zen:'🧘' };
 
 const params = new URLSearchParams(window.location.search);
@@ -684,8 +683,9 @@ async function toggleMic(){
     if(blob.size < 1000){ if(statusEl) statusEl.classList.remove('hidden'); return; }
     btn.classList.add('processing');
     try {
-      const res = await fetch(`${SB_URL}/functions/v1/transcribe?key=${encodeURIComponent(CHECKIN_VOICE_KEY)}`,
-        { method:'POST', headers:{ 'Content-Type': actualMime }, body: blob });
+      // The signed-in session is the pass — no voice key in the page any more
+      const res = await fetch(`${SB_URL}/functions/v1/transcribe`,
+        { method:'POST', headers:{ 'Content-Type': actualMime, 'x-dids-session': SBH['x-dids-session'] || '' }, body: blob });
       if(!res.ok) throw new Error('Transcribe ' + res.status);
       const data = await res.json();
       const transcript = (data.transcript || '').trim();
