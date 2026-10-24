@@ -395,6 +395,38 @@ function showScreen(id){
 const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
 const SBH = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
+
+// ─── Sign-in session (security update, Oct 2026) ──────────────────────────
+// Codes and PINs are checked by the database now, never in the browser. A good
+// sign-in returns a session key that this device keeps (localStorage) and sends
+// with every request as x-dids-session; without it the database shares nothing.
+const DIDS_AUTH = {
+  key(kind, token){ return `dids_${kind}_session_${token}`; },
+  get(kind, token){ try { return localStorage.getItem(this.key(kind, token)); } catch(e){ return null; } },
+  set(kind, token, s){ try { localStorage.setItem(this.key(kind, token), s); } catch(e){} },
+  clear(kind, token){ try { localStorage.removeItem(this.key(kind, token)); } catch(e){} },
+  trainerSessions(){
+    const out = [];
+    try { for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.startsWith('dids_trainer_session_')) out.push(localStorage.getItem(k)); } } catch(e){}
+    return out.filter(Boolean);
+  },
+  use(s){ if(s) SBH['x-dids-session'] = s; else delete SBH['x-dids-session']; },
+  async rpc(name, args){
+    const r = await fetch(`${SB_URL}/rest/v1/rpc/${name}`, { method: 'POST', headers: { ...SBH, 'Content-Type': 'application/json' }, body: JSON.stringify(args || {}) });
+    if(!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+  // Resume a saved session: returns the dids_me() result, or null if none of them is still valid
+  async resume(candidates, accept){
+    for(const s of candidates){
+      if(!s) continue;
+      this.use(s);
+      try { const me = await this.rpc('dids_me'); if(me && me.ok && accept(me)) return me; } catch(e){}
+    }
+    this.use(null);
+    return null;
+  }
+};
 async function sbReq(path, opts = {}) {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...opts, headers: { ...SBH, ...opts.headers } });
   if (!r.ok) throw new Error(await r.text());
@@ -535,6 +567,16 @@ function goToAdmin(){
 }
 
 async function initLibrary(){
+  // Signed in as a trainer on this device? If not, the main admin page handles the PIN.
+  const me = CURRENT_TOKEN
+    ? await DIDS_AUTH.resume([DIDS_AUTH.get('trainer', CURRENT_TOKEN)], m => m.kind === 'trainer' && m.trainer.token === CURRENT_TOKEN)
+    : null;
+  if(!me){
+    if(!CURRENT_TOKEN){ showScreen('screen-denied'); return; }
+    window.location.href = `index.html?id=${CURRENT_TOKEN}`;
+    return;
+  }
+
   let trainers;
   try {
     trainers = await sbReq('checkin_trainers?select=id,name,token&archived_at=is.null');

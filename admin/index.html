@@ -597,6 +597,38 @@ const ADMIN_BASE_URL = BASE_URL + 'admin/index.html'; // trainer logins open the
 const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
 const SBH = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
+
+// ─── Sign-in session (security update, Oct 2026) ──────────────────────────
+// Codes and PINs are checked by the database now, never in the browser. A good
+// sign-in returns a session key that this device keeps (localStorage) and sends
+// with every request as x-dids-session; without it the database shares nothing.
+const DIDS_AUTH = {
+  key(kind, token){ return `dids_${kind}_session_${token}`; },
+  get(kind, token){ try { return localStorage.getItem(this.key(kind, token)); } catch(e){ return null; } },
+  set(kind, token, s){ try { localStorage.setItem(this.key(kind, token), s); } catch(e){} },
+  clear(kind, token){ try { localStorage.removeItem(this.key(kind, token)); } catch(e){} },
+  trainerSessions(){
+    const out = [];
+    try { for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.startsWith('dids_trainer_session_')) out.push(localStorage.getItem(k)); } } catch(e){}
+    return out.filter(Boolean);
+  },
+  use(s){ if(s) SBH['x-dids-session'] = s; else delete SBH['x-dids-session']; },
+  async rpc(name, args){
+    const r = await fetch(`${SB_URL}/rest/v1/rpc/${name}`, { method: 'POST', headers: { ...SBH, 'Content-Type': 'application/json' }, body: JSON.stringify(args || {}) });
+    if(!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+  // Resume a saved session: returns the dids_me() result, or null if none of them is still valid
+  async resume(candidates, accept){
+    for(const s of candidates){
+      if(!s) continue;
+      this.use(s);
+      try { const me = await this.rpc('dids_me'); if(me && me.ok && accept(me)) return me; } catch(e){}
+    }
+    this.use(null);
+    return null;
+  }
+};
 async function sbReq(path, opts = {}) {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...opts, headers: { ...SBH, ...opts.headers } });
   if (!r.ok) throw new Error(await r.text());
@@ -804,7 +836,9 @@ function copyTrainerLink(name, token){
 
 async function resetTrainerPin(trainerId, name){
   try {
-    await sbReq(`checkin_trainers?id=eq.${trainerId}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({pin: null})});
+    // Admins only (checked by the database); also signs that trainer out everywhere
+    const res = await DIDS_AUTH.rpc('dids_reset_trainer_pin', { p_trainer_id: trainerId });
+    if(!res || !res.ok) throw new Error('not allowed');
   } catch(e){
     showToast('✗ Could not reset — try again');
     return;
@@ -1715,43 +1749,51 @@ let currentTrainerId = null;
 let pendingSignup = null;
 
 async function init(){
+  // Sign-in comes first: nothing real loads until the database has confirmed this
+  // trainer (staff link + PIN). The PIN is checked server-side, never in the browser,
+  // and a good sign-in leaves a session on this device so it stays a one-time step.
+  const me = CURRENT_TOKEN
+    ? await DIDS_AUTH.resume([DIDS_AUTH.get('trainer', CURRENT_TOKEN)], m => m.kind === 'trainer' && m.trainer.token === CURRENT_TOKEN)
+    : null;
+  if(me){ await startSignedIn(); return; }
+  if(CURRENT_TOKEN) DIDS_AUTH.clear('trainer', CURRENT_TOKEN);
+
+  let hello = null;
+  if(CURRENT_TOKEN){
+    try { hello = await DIDS_AUTH.rpc('dids_trainer_hello', { p_token: CURRENT_TOKEN }); }
+    catch(e){ document.getElementById('sim-label').textContent = 'Could not load — check connection'; return; }
+  }
+  if(!hello || !hello.ok){
+    // No token, or one that doesn't match a real, active trainer: shows nothing real
+    // at all — no names, no clients, no banner. Access requires an actual staff link.
+    document.getElementById('sim-banner').classList.add('hidden');
+    showScreen('screen-denied');
+    return;
+  }
+
+  // Unlike clients, there's no natural default (no phone number stored for trainers),
+  // so a trainer with no PIN yet gets a genuine "set one up" moment, not a pre-filled one.
+  document.getElementById('sim-banner').classList.add('hidden');
+  document.getElementById('trainer-verify-greeting').textContent = `Hey ${hello.name} 👋`;
+  document.getElementById('trainer-setup-pin-greeting').textContent = `Hey ${hello.name} 👋`;
+  showScreen(hello.pin_set ? 'screen-trainer-verify' : 'screen-trainer-setup-pin');
+}
+
+async function startSignedIn(){
   try {
     await Promise.all([loadRealData(), loadCatalog()]);
   } catch(e){
     document.getElementById('sim-label').textContent = 'Could not load — check connection';
     return;
   }
-
-  const matched = CURRENT_TOKEN ? trainers.find(t => t.token === CURRENT_TOKEN && !t.archived) : null;
-
+  const matched = trainers.find(t => t.token === CURRENT_TOKEN && !t.archived);
   if(!matched){
-    // No token, or one that doesn't match a real, active trainer. This used to fall
-    // back to a picker showing every trainer's real roster — a real data exposure,
-    // since this page is public and reachable by anyone. Now it shows nothing real
-    // at all: no names, no clients, no banner. Access requires an actual staff link.
     document.getElementById('sim-banner').classList.add('hidden');
     showScreen('screen-denied');
     return;
   }
-
   currentTrainerId = matched.id;
-
-  // Same one-time-per-device check as clients get, but trainers hold much higher-stakes
-  // access — full rosters, catalog edits, archiving — so this matters even more here.
-  // Unlike clients, there's no natural default (no phone number stored for trainers),
-  // so a trainer with no PIN yet gets a genuine "set one up" moment, not a pre-filled one.
-  if(!isTrainerVerifiedOnThisDevice(matched.token)){
-    document.getElementById('sim-banner').classList.add('hidden');
-    document.getElementById('trainer-verify-greeting').textContent = `Hey ${matched.name} 👋`;
-    document.getElementById('trainer-setup-pin-greeting').textContent = `Hey ${matched.name} 👋`;
-    if(matched.pin){
-      showScreen('screen-trainer-verify');
-    } else {
-      showScreen('screen-trainer-setup-pin');
-    }
-    return;
-  }
-
+  document.getElementById('sim-banner').classList.remove('hidden');
   continueAfterTrainerVerify(matched);
 }
 
@@ -1788,14 +1830,19 @@ function checkTrainerVerifyValid(){
   document.getElementById('trainer-verify-error').classList.add('hidden');
 }
 async function submitTrainerVerify(){
-  const matched = trainers.find(t => t.token === CURRENT_TOKEN);
   const entered = document.getElementById('trainer-verify-input').value.trim();
-  if(entered === matched.pin){
-    markTrainerVerifiedOnThisDevice(matched.token);
-    document.getElementById('sim-banner').classList.remove('hidden');
-    continueAfterTrainerVerify(matched);
+  document.getElementById('trainer-verify-btn').disabled = true;
+  let res = null;
+  try { res = await DIDS_AUTH.rpc('dids_trainer_login', { p_token: CURRENT_TOKEN, p_pin: entered }); }
+  catch(e){ showToast('Could not reach the server — try again'); document.getElementById('trainer-verify-btn').disabled = false; return; }
+  if(res && res.ok){
+    DIDS_AUTH.set('trainer', CURRENT_TOKEN, res.session);
+    DIDS_AUTH.use(res.session);
+    markTrainerVerifiedOnThisDevice(CURRENT_TOKEN); // still read by older checks on the library page
+    await startSignedIn();
   } else {
     trainerVerifyFailCount++;
+    if(res && res.error === 'too_many_attempts') trainerVerifyFailCount = Math.max(trainerVerifyFailCount, 3);
     document.getElementById('trainer-verify-error').classList.remove('hidden');
     document.getElementById('trainer-verify-input').value = '';
     document.getElementById('trainer-verify-btn').disabled = true;
@@ -1807,19 +1854,19 @@ function checkTrainerSetupPinValid(){
   document.getElementById('trainer-setup-pin-btn').disabled = document.getElementById('trainer-setup-pin-input').value.trim().length !== 4;
 }
 async function submitTrainerSetupPin(){
-  const matched = trainers.find(t => t.token === CURRENT_TOKEN);
   const newPin = document.getElementById('trainer-setup-pin-input').value.trim();
   if(newPin.length !== 4) return;
-  try {
-    await sbReq(`checkin_trainers?id=eq.${matched.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify({pin: newPin})});
-  } catch(e){
+  // First-time setup only: the database refuses this once a PIN exists (an admin can clear it)
+  let res = null;
+  try { res = await DIDS_AUTH.rpc('dids_trainer_set_pin', { p_token: CURRENT_TOKEN, p_new_pin: newPin }); } catch(e){ res = null; }
+  if(!res || !res.ok){
     document.getElementById('trainer-setup-pin-error').classList.remove('hidden');
     return;
   }
-  matched.pin = newPin;
-  markTrainerVerifiedOnThisDevice(matched.token);
-  document.getElementById('sim-banner').classList.remove('hidden');
-  continueAfterTrainerVerify(matched);
+  DIDS_AUTH.set('trainer', CURRENT_TOKEN, res.session);
+  DIDS_AUTH.use(res.session);
+  markTrainerVerifiedOnThisDevice(CURRENT_TOKEN); // still read by older checks on the library page
+  await startSignedIn();
 }
 
 function renderSimPills(){

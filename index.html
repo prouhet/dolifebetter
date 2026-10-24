@@ -315,6 +315,38 @@ const SB_URL = "https://rzkrydqtgmuyeaipronh.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6a3J5ZHF0Z211eWVhaXByb25oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzE1NDksImV4cCI6MjA5MDQwNzU0OX0.YFSnanaiB_TJrAmlWN1ziARjajLaeT7kMrJT2TlkTy4";
 const SBH = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
 
+// ─── Sign-in session (security update, Oct 2026) ──────────────────────────
+// Codes and PINs are checked by the database now, never in the browser. A good
+// sign-in returns a session key that this device keeps (localStorage) and sends
+// with every request as x-dids-session; without it the database shares nothing.
+const DIDS_AUTH = {
+  key(kind, token){ return `dids_${kind}_session_${token}`; },
+  get(kind, token){ try { return localStorage.getItem(this.key(kind, token)); } catch(e){ return null; } },
+  set(kind, token, s){ try { localStorage.setItem(this.key(kind, token), s); } catch(e){} },
+  clear(kind, token){ try { localStorage.removeItem(this.key(kind, token)); } catch(e){} },
+  trainerSessions(){
+    const out = [];
+    try { for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.startsWith('dids_trainer_session_')) out.push(localStorage.getItem(k)); } } catch(e){}
+    return out.filter(Boolean);
+  },
+  use(s){ if(s) SBH['x-dids-session'] = s; else delete SBH['x-dids-session']; },
+  async rpc(name, args){
+    const r = await fetch(`${SB_URL}/rest/v1/rpc/${name}`, { method: 'POST', headers: { ...SBH, 'Content-Type': 'application/json' }, body: JSON.stringify(args || {}) });
+    if(!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
+  // Resume a saved session: returns the dids_me() result, or null if none of them is still valid
+  async resume(candidates, accept){
+    for(const s of candidates){
+      if(!s) continue;
+      this.use(s);
+      try { const me = await this.rpc('dids_me'); if(me && me.ok && accept(me)) return me; } catch(e){}
+    }
+    this.use(null);
+    return null;
+  }
+};
+
 // ─── Voice input — same mechanism as capture.html, pointed at the ───────────
 // scoped CHECKIN_VOICE_KEY instead of a real brainKey (that key only unlocks
 // /transcribe, nothing else — safe to embed in a public client-facing page).
@@ -425,6 +457,7 @@ const params = new URLSearchParams(window.location.search);
 const CLIENT_TOKEN = params.get('id');
 const PREVIEW_MODE = params.get('preview') === '1'; // trainer looking at what their client sees — never writes real data
 let CLIENT = null;
+let CLIENT_ME = null; // who the database says is signed in (dids_me / login result)
 let ASSIGNMENTS = [];
 let ANSWERS = {};
 let currentDailyId = null;
@@ -492,12 +525,20 @@ function checkVerifyValid(){
 let verifyFailCount = 0;
 async function submitVerify(){
   const entered = document.getElementById('verify-input').value.trim();
-  const correctPin = CLIENT.pin || last4(CLIENT.phone);
-  if(entered === correctPin){
+  document.getElementById('verify-btn').disabled = true;
+  let res = null;
+  try { res = await DIDS_AUTH.rpc('dids_client_login', { p_token: CLIENT_TOKEN, p_code: entered }); }
+  catch(e){ alert('Could not reach the server — check your connection and try again.'); document.getElementById('verify-btn').disabled = false; return; }
+  if(res && res.ok){
+    DIDS_AUTH.set('client', CLIENT_TOKEN, res.session);
+    DIDS_AUTH.use(res.session);
+    CLIENT_ME = res;
     markVerifiedOnThisDevice();
+    if(!(await loadSignedInClient())) return;
     await continueAfterVerify();
   } else {
     verifyFailCount++;
+    if(res && res.error === 'too_many_attempts') verifyFailCount = Math.max(verifyFailCount, 3);
     document.getElementById('verify-error').classList.remove('hidden');
     document.getElementById('verify-input').value = '';
     document.getElementById('verify-btn').disabled = true;
@@ -757,30 +798,47 @@ function proceedPastCelebration(){
 async function init(){
   if(PREVIEW_MODE) document.getElementById('preview-banner').classList.remove('hidden');
   if(!CLIENT_TOKEN){ window.location.href = 'get-started.html'; return; }
-  let rows;
-  try {
-    rows = await sbReq(`checkin_clients?select=id,name,token,phone,pin,checkin_trainers(id,name,email,token),checkin_orgs(name)&token=eq.${encodeURIComponent(CLIENT_TOKEN)}`);
-  } catch(e){ showScreen('screen-error'); return; }
-  if(!rows || !rows.length){ showScreen('screen-error'); return; }
-  CLIENT = rows[0];
   if(isHomeScreenTipHidden()){
     const homeScreenCard = document.getElementById('home-screen-card');
     if(homeScreenCard) homeScreenCard.classList.add('hidden');
   }
 
   // One-time identity check per device — protects against a forwarded or
-  // glanced-at link without adding friction to daily use. Once confirmed,
-  // this device is trusted for this specific client going forward.
-  // Preview mode (trainer looking at what their client sees) skips this —
-  // already authenticated as staff — but never marks the device verified,
-  // so it has no effect on the client's own future visits.
-  if(!PREVIEW_MODE && !isVerifiedOnThisDevice()){
+  // glanced-at link without adding friction to daily use. The database checks
+  // the code and hands back a session this device keeps, so it's still a
+  // one-time step. Preview mode (trainer looking at what their client sees)
+  // uses that trainer's own staff session from the admin pages instead, and
+  // never creates or touches the client's session.
+  CLIENT_ME = PREVIEW_MODE
+    ? await DIDS_AUTH.resume(DIDS_AUTH.trainerSessions(), me => me.kind === 'trainer')
+    : await DIDS_AUTH.resume([DIDS_AUTH.get('client', CLIENT_TOKEN)], me => me.kind === 'client' && me.client.token === CLIENT_TOKEN);
+
+  if(!CLIENT_ME){
+    if(PREVIEW_MODE){ showScreen('screen-error'); return; }
+    DIDS_AUTH.clear('client', CLIENT_TOKEN);
+    let hello = null;
+    try { hello = await DIDS_AUTH.rpc('dids_client_hello', { p_token: CLIENT_TOKEN }); } catch(e){ showScreen('screen-error'); return; }
+    if(!hello || !hello.ok){ showScreen('screen-error'); return; }
+    CLIENT = { name: hello.name || '', checkin_trainers: hello.trainer_name ? { name: hello.trainer_name } : null };
     document.getElementById('verify-greeting').textContent = `Hey ${CLIENT.name.split(' ')[0]} 👋`;
     showScreen('screen-verify');
     return;
   }
 
+  if(!(await loadSignedInClient())) return;
   await continueAfterVerify();
+}
+
+async function loadSignedInClient(){
+  let rows;
+  try {
+    rows = await sbReq(`checkin_clients?select=id,name,token,phone,checkin_trainers(id,name),checkin_orgs(name)&token=eq.${encodeURIComponent(CLIENT_TOKEN)}`);
+  } catch(e){ showScreen('screen-error'); return false; }
+  if(!rows || !rows.length){ showScreen('screen-error'); return false; }
+  CLIENT = rows[0];
+  // Clients can't read the trainers table directly; their trainer's name comes with the session
+  if(!CLIENT.checkin_trainers && CLIENT_ME && CLIENT_ME.trainer) CLIENT.checkin_trainers = { id: CLIENT_ME.trainer.id, name: CLIENT_ME.trainer.name };
+  return true;
 }
 
 function dismissWelcome(){ markWelcomeSeen(); showScreen('screen-poll'); }
@@ -1081,15 +1139,12 @@ async function doSubmit(note){
 }
 
 function notifyTrainer(note){
-  const trainer = CLIENT.checkin_trainers;
-  if(!trainer || !trainer.email) return; // nothing to notify, don't block on it
+  // The server works out who to email (this client's own trainer) from the session —
+  // the page no longer sees trainer emails, and the function no longer takes a recipient.
   fetch(`${SB_URL}/functions/v1/notify-trainer`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SB_KEY}`, 'apikey': SB_KEY },
-    body: JSON.stringify({
-      trainerEmail: trainer.email, trainerName: trainer.name, trainerToken: trainer.token,
-      clientId: CLIENT.id, clientName: CLIENT.name, note: note || null
-    })
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SB_KEY}`, 'apikey': SB_KEY, 'x-dids-session': SBH['x-dids-session'] || '' },
+    body: JSON.stringify({ notificationType: 'tough_day', note: note || null })
   }).catch(e => { /* the check-in itself already saved — a failed email here shouldn't alarm the client */ });
 }
 
