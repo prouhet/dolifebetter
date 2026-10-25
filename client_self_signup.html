@@ -228,6 +228,21 @@ input::placeholder{color:var(--ink-faint)}
       <div id="review-trainer" style="font-size:14px;font-weight:600"></div>
     </div>
 
+    <div class="field-block" style="background:var(--surface);border:1px solid var(--surface-soft);border-radius:14px;padding:16px;box-shadow:var(--shadow-sm);margin-top:14px">
+      <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
+        <input type="checkbox" id="reminder-optin" onchange="renderReminderOptIn()" style="width:18px;height:18px;margin-top:2px;accent-color:var(--teal);flex-shrink:0">
+        <span style="font-size:13.5px;line-height:1.5;color:var(--ink)"><strong>Text me a daily reminder</strong> with my check-in link, from Dids Today at (442) 248-5248. Msg &amp; data rates may apply. Reply STOP anytime to opt out.</span>
+      </label>
+      <div id="reminder-fields" class="hidden" style="margin-top:14px">
+        <div class="field-label">What time?</div>
+        <input type="time" id="reminder-time" value="19:30" step="300" style="width:auto;padding:10px 12px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:15px;color:var(--ink);outline:none">
+        <div class="field-label" style="margin-top:12px">Which days?</div>
+        <div id="reminder-days" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        <div style="font-size:12px;color:var(--ink-faint);margin-top:8px">Only on days you haven't checked in yet. You can change this anytime.</div>
+      </div>
+      <div id="reminder-error" class="hidden" style="font-size:13px;color:var(--care);margin-top:10px"></div>
+    </div>
+
     <button class="cta" onclick="submitSignup()">Send to a Trainer</button>
   </div>
 
@@ -580,10 +595,44 @@ function goToReview(){
   document.getElementById('review-dids').textContent = names.length ? names.join(', ') : 'Open to suggestions';
   const trainerOpt = document.querySelector('#signup-trainer-pref .pill-opt.selected');
   document.getElementById('review-trainer').textContent = trainerOpt ? trainerOpt.textContent : "I don't know / no preference";
+  renderReminderOptIn();
   showScreen('screen-review');
 }
 
+// ---- Daily reminder text (optional, their own opt-in) ----
+const REMINDER_DAY_LIST = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+let reminderDays = [...REMINDER_DAY_LIST];
+function renderReminderOptIn(){
+  const on = document.getElementById('reminder-optin').checked;
+  document.getElementById('reminder-fields').classList.toggle('hidden', !on);
+  document.getElementById('reminder-error').classList.add('hidden');
+  renderReminderDays();
+}
+function renderReminderDays(){
+  document.getElementById('reminder-days').innerHTML = REMINDER_DAY_LIST.map(d =>
+    `<button type="button" class="wizard-day-btn ${reminderDays.includes(d) ? 'selected' : ''}" aria-label="${d}" onclick="toggleReminderDay('${d}')">${d[0]}</button>`).join('');
+}
+function toggleReminderDay(d){
+  reminderDays = reminderDays.includes(d) ? reminderDays.filter(x => x !== d) : [...reminderDays, d];
+  renderReminderDays();
+}
+function reminderChoice(){
+  const on = document.getElementById('reminder-optin').checked;
+  if(!on) return { ok: true, opt_in: false, time: null, days: null };
+  const time = document.getElementById('reminder-time').value || null;
+  if(!time) return { ok: false, error: 'Pick a time for your reminder text.' };
+  if(!reminderDays.length) return { ok: false, error: 'Pick at least one day.' };
+  const days = reminderDays.length === 7 ? null : REMINDER_DAY_LIST.filter(d => reminderDays.includes(d)); // null = every day
+  return { ok: true, opt_in: true, time, days };
+}
+
 async function submitSignup(){
+  const reminder = reminderChoice();
+  if(!reminder.ok){
+    const el = document.getElementById('reminder-error');
+    el.textContent = reminder.error; el.classList.remove('hidden');
+    return;
+  }
   const name = document.getElementById('signup-name').value.trim();
   const phone = document.getElementById('signup-phone').value.trim();
   const note = suggestionText ? `Also interested in (their own words): ${suggestionText}` : null;
@@ -603,7 +652,8 @@ async function submitSignup(){
     await sbReq('checkin_signups', { method:'POST', headers:{Prefer:'return=minimal'}, body: JSON.stringify({
       name, phone, org_id: selectedOrgId, requested_item_ids: selectedDids.length ? selectedDids : null,
       requested_item_config: requestedItemConfig,
-      preferred_trainer_id: selectedTrainerId, note, status: 'pending'
+      preferred_trainer_id: selectedTrainerId, note, status: 'pending',
+      reminder_opt_in: reminder.opt_in, reminder_time: reminder.time, reminder_days: reminder.days
     }) });
   } catch(e){
     // Older schema without one of the newer columns — fall back to the safe minimal payload
