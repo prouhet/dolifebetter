@@ -140,6 +140,9 @@ input:focus{border-color:var(--teal)}
 .day-pick{width:32px;height:32px;border-radius:9px;background:var(--bg);border:1.5px solid var(--surface-soft);color:var(--ink-dim);
   font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s ease}
 .day-pick.on{background:var(--teal);border-color:var(--teal);color:#fff}
+/* Reminder-text day chips: own class on purpose — assigning a did reads every .day-pick on the page */
+.rem-day-pick{width:32px;height:32px;border-radius:9px;background:var(--bg);border:1.5px solid var(--surface-soft);color:var(--ink-dim);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;cursor:pointer}
+.rem-day-pick.on{background:var(--teal);border-color:var(--teal);color:#fff}
 
 .mode-toggle{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .mode-opt{border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);padding:10px;text-align:center;
@@ -226,6 +229,8 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
             <span style="font-size:13px;color:var(--ink)">Send reminders</span>
           </label>
         </div>
+        <div style="font-size:12px;color:var(--ink-faint);margin:12px 0 6px">Which days?</div>
+        <div id="reminder-days" style="display:flex;gap:6px"></div>
         <div style="font-size:11.5px;color:var(--ink-faint);margin-top:10px">Turn this on once you've turned off your own autotext for them, so they don't get two.</div>
         <div id="reminder-live-note" class="hidden" style="font-size:11.5px;color:var(--care);margin-top:4px">Texts aren't sending yet — save the time now and reminders start automatically once texting is set up.</div>
         <div style="display:flex;gap:18px;align-items:center;margin-top:12px">
@@ -1324,9 +1329,28 @@ function toggleAdminOrgPanel(){
 // sender only texts on a day they haven't logged yet and have a did scheduled,
 // at most once a day, one-way (no replies expected). Off by default — a trainer
 // flips it on once they've turned off their own autotext, so nobody gets two.
-const REMINDERS_LIVE = false; // flip to true once the TextIt sender is running
+const REMINDERS_LIVE = true; // the TextIt sender (dids-reminders) is running
 let reminderPanelOpen = false;
 let pendingReminderEnabled = false;
+const REMINDER_DAY_LIST = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+let pendingReminderDays = [...REMINDER_DAY_LIST];
+
+// "weekdays", "weekends", "Mon, Wed, Fri" — empty when it's every day
+function reminderDaysSummary(days){
+  if(!Array.isArray(days) || !days.length || days.length === 7) return '';
+  const k = days.join(',');
+  if(k === 'Mon,Tue,Wed,Thu,Fri') return 'weekdays';
+  if(k === 'Sat,Sun') return 'weekends';
+  return days.join(', ');
+}
+function renderReminderDays(){
+  document.getElementById('reminder-days').innerHTML = REMINDER_DAY_LIST.map(d =>
+    `<div class="rem-day-pick ${pendingReminderDays.includes(d) ? 'on' : ''}" onclick="toggleReminderDay('${d}')">${d[0]}</div>`).join('');
+}
+function toggleReminderDay(d){
+  pendingReminderDays = pendingReminderDays.includes(d) ? pendingReminderDays.filter(x => x !== d) : [...pendingReminderDays, d];
+  renderReminderDays();
+}
 
 function fmtReminderTime(t){
   if(!t) return '';
@@ -1338,7 +1362,7 @@ function renderReminder(){
   const t = CLIENT.reminder_time;
   document.getElementById('reminder-link').textContent = !t
     ? '⏰ Set reminder time'
-    : `⏰ Reminder ${fmtReminderTime(t)}${CLIENT.reminder_enabled ? '' : ' (off)'}`;
+    : `⏰ Reminder ${fmtReminderTime(t)}${reminderDaysSummary(CLIENT.reminder_days) ? ' · ' + reminderDaysSummary(CLIENT.reminder_days) : ''}${CLIENT.reminder_enabled ? '' : ' (off)'}`;
   document.getElementById('reminder-panel').classList.toggle('hidden', !reminderPanelOpen);
   document.getElementById('reminder-live-note').classList.toggle('hidden', REMINDERS_LIVE);
   renderReminderToggle();
@@ -1357,6 +1381,8 @@ function toggleReminderPanel(){
     // default for convenience once they pick a time.
     document.getElementById('reminder-time-input').value = CLIENT.reminder_time ? String(CLIENT.reminder_time).slice(0,5) : '';
     pendingReminderEnabled = CLIENT.reminder_time ? !!CLIENT.reminder_enabled : true;
+    pendingReminderDays = Array.isArray(CLIENT.reminder_days) && CLIENT.reminder_days.length ? [...CLIENT.reminder_days] : [...REMINDER_DAY_LIST];
+    renderReminderDays();
   }
   renderReminder();
 }
@@ -1369,7 +1395,9 @@ function toggleReminderEnabled(){
 async function saveReminder(){
   const val = document.getElementById('reminder-time-input').value; // "HH:MM", or "" when blank
   if(pendingReminderEnabled && !val){ showToast('✗ Pick a time first'); return; }
-  const body = { reminder_time: val || null, reminder_enabled: val ? pendingReminderEnabled : false };
+  if(val && !pendingReminderDays.length){ showToast('✗ Pick at least one day'); return; }
+  const days = pendingReminderDays.length === 7 ? null : REMINDER_DAY_LIST.filter(d => pendingReminderDays.includes(d)); // null = every day
+  const body = { reminder_time: val || null, reminder_days: val ? days : null, reminder_enabled: val ? pendingReminderEnabled : false };
   try {
     await sbReq(`checkin_clients?id=eq.${CLIENT.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify(body)});
   } catch(e){
@@ -1377,17 +1405,19 @@ async function saveReminder(){
     return;
   }
   CLIENT.reminder_time = body.reminder_time;
+  CLIENT.reminder_days = body.reminder_days;
   CLIENT.reminder_enabled = body.reminder_enabled;
   reminderPanelOpen = false;
   renderReminder();
   showToast(body.reminder_time
-    ? `✓ Reminder set for ${fmtReminderTime(body.reminder_time)}${body.reminder_enabled ? '' : ' (off for now)'}`
+    ? `✓ Reminder set for ${fmtReminderTime(body.reminder_time)}${reminderDaysSummary(body.reminder_days) ? ', ' + reminderDaysSummary(body.reminder_days) : ''}${body.reminder_enabled ? '' : ' (off for now)'}`
     : '✓ Reminder cleared');
 }
 
 function clearReminder(){
   document.getElementById('reminder-time-input').value = '';
   pendingReminderEnabled = false;
+  pendingReminderDays = [...REMINDER_DAY_LIST];
   saveReminder();
 }
 

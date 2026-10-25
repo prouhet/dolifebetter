@@ -476,6 +476,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div class="trainer-select" id="new-client-org"></div>
       </div>
       <div class="field-block">
+        <div id="signup-reminder-note" class="hidden" style="font-size:13px;color:var(--teal-deep);background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:10px 12px;margin-bottom:12px"></div>
         <div class="field-label" id="new-client-dids-label">Starting dids <span style="font-weight:400;color:var(--ink-faint)">— optional, add more anytime</span></div>
         <div id="new-client-dids"></div>
         <div class="new-did-toggle" onclick="toggleNewDidForm()" id="new-did-toggle">+ Create a new did</div>
@@ -1077,6 +1078,18 @@ function completeSignup(id){
   if(!s) return;
   openAddClient(false);
   pendingSignup = s;
+  // Their own reminder-text choice from signup — it carries over when you add them
+  const remNote = document.getElementById('signup-reminder-note');
+  if(s.reminder_opt_in && s.reminder_time){
+    const [h, m] = String(s.reminder_time).split(':').map(Number);
+    const t = `${((h + 11) % 12) + 1}:${String(m).padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}`;
+    const days = Array.isArray(s.reminder_days) && s.reminder_days.length ? s.reminder_days.join(', ') : 'every day';
+    remNote.textContent = `⏰ Asked for a daily reminder text at ${t}, ${days}. It turns on when you add them, and their welcome text goes out within 15 minutes.`;
+    remNote.classList.remove('hidden');
+  } else {
+    remNote.textContent = "⏰ Didn't ask for reminder texts. You can turn them on later from their plan.";
+    remNote.classList.remove('hidden');
+  }
   document.getElementById('new-client-name').value = s.name;
   document.getElementById('new-client-phone').value = s.phone || '';
   document.querySelectorAll('#new-client-org .trainer-opt').forEach(o => o.classList.toggle('selected', o.dataset.oid === s.org_id));
@@ -1438,6 +1451,7 @@ async function createNewDid(){
 
 function openAddClient(fromRoster){
   pendingSignup = null;
+  document.getElementById('signup-reminder-note').classList.add('hidden');
   signupReviewConfigs = {};
   document.getElementById('trainer-field-block').classList.toggle('hidden', !!fromRoster);
   document.getElementById('trainer-locked-block').classList.toggle('hidden', !fromRoster);
@@ -1519,7 +1533,11 @@ async function _addClient(){
   let newClient;
   try {
     const rows = await sbReq('checkin_clients', {method:'POST', headers:{Prefer:'return=representation'}, body: JSON.stringify({
-      name, trainer_id: trainerId, org_id: orgId, phone, token: genToken()
+      name, trainer_id: trainerId, org_id: orgId, phone, token: genToken(),
+      // A signup that opted in to reminder texts keeps its time and days; everyone else starts off
+      ...(pendingSignup && pendingSignup.reminder_opt_in && pendingSignup.reminder_time
+        ? { reminder_time: pendingSignup.reminder_time, reminder_days: pendingSignup.reminder_days || null, reminder_enabled: true }
+        : {})
     })});
     newClient = rows[0];
   } catch(e){
