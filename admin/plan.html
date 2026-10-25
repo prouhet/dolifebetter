@@ -222,6 +222,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
           <div style="font-size:13px;color:var(--ink-dim);margin-bottom:12px">Text them this link — it's just for them.</div>
           <div style="background:var(--bg);border:1.5px solid var(--surface-soft);border-radius:12px;padding:12px 14px;margin-bottom:14px;word-break:break-all;font-size:13px;color:var(--ink-dim);font-family:monospace" id="link-modal-text"></div>
           <button class="save-btn" id="link-modal-copy-btn" onclick="copyClientPlanLink()">Copy Link</button>
+          <div style="text-align:center;margin-top:14px;font-size:12.5px;color:var(--ink-dim)">Locked out? <span style="text-decoration:underline;cursor:pointer" onclick="resetClientCode()">Reset their sign-in code</span></div>
           <div style="text-align:center;margin-top:12px;font-size:13px;color:var(--ink-dim);cursor:pointer" onclick="closeClientLinkModal()">Close</div>
         </div>
       </div>
@@ -607,6 +608,19 @@ function previewCheckin(){
   // blocks real data from being written — see index.html's doSubmit().
   // Same site as this page, so the preview can use this trainer's signed-in session.
   window.open(`${location.origin}/?id=${CLIENT.token}&preview=1`, '_blank');
+}
+// Clears the client's own PIN (and their failed attempts) so they can sign in again with
+// the last 4 digits of their phone, then choose a new PIN in My Dids. Checked server-side:
+// only an admin or a trainer who can see this client may do it.
+async function resetClientCode(){
+  const first = CLIENT.name.split(' ')[0];
+  if(!confirm(`Reset ${first}'s sign-in code? They'll sign in with the last 4 digits of their phone number, then can pick a new PIN.`)) return;
+  let res = null;
+  try { res = await DIDS_AUTH.rpc('dids_reset_client_pin', { p_client_id: CLIENT.id }); } catch(e){ res = null; }
+  if(!res || !res.ok){ showToast('✗ Could not reset — try again'); return; }
+  const digits = String(CLIENT.phone || '').replace(/\D/g, '');
+  showToast(digits.length >= 4 ? `✓ Reset — ${first} can sign in with the last 4 of their phone` : `✓ Reset — but ${first} has no phone number on file, so add one first`);
+  closeClientLinkModal();
 }
 function closeClientLinkModal(){
   document.getElementById('link-modal').classList.add('hidden');
