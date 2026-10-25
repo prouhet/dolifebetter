@@ -208,12 +208,30 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="previewCheckin()">👀 Preview their check-in</div>
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="openChangeTrainer()">↔️ Change trainer</div>
         <div id="admin-org-link" class="hidden" style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="toggleAdminOrgPanel()">🏢 Org access</div>
+        <div id="reminder-link" style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="toggleReminderPanel()">⏰ Set reminder time</div>
         <div style="font-size:13px;font-weight:600;color:var(--care);cursor:pointer" onclick="startArchiveClient()">🗄️ Archive this client</div>
       </div>
 
       <div id="admin-org-access" class="hidden" style="margin:-8px 0 18px;padding:10px 14px;background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px">
         <div style="font-size:12px;color:var(--ink-faint);margin-bottom:6px">Also let this client pick from these orgs' items:</div>
         <div id="admin-org-access-list" style="display:flex;flex-wrap:wrap;gap:6px 18px"></div>
+      </div>
+
+      <div id="reminder-panel" class="hidden" style="margin:-8px 0 18px;padding:12px 14px;background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px">
+        <div style="font-size:12px;color:var(--ink-faint);margin-bottom:10px">Daily reminder text with their check-in link — only sent on days they haven't logged yet. Central time.</div>
+        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+          <input type="time" id="reminder-time-input" step="300" style="background:var(--bg);border:1.5px solid var(--surface-soft);border-radius:10px;padding:9px 12px;font-family:'DM Sans',sans-serif;font-size:15px;color:var(--ink);outline:none">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="event.preventDefault(); toggleReminderEnabled()">
+            <div id="reminder-enabled-box" style="width:18px;height:18px;border-radius:5px;border:1.5px solid var(--surface-soft);background:var(--bg);display:flex;align-items:center;justify-content:center;flex-shrink:0"></div>
+            <span style="font-size:13px;color:var(--ink)">Send reminders</span>
+          </label>
+        </div>
+        <div style="font-size:11.5px;color:var(--ink-faint);margin-top:10px">Turn this on once you've turned off your own autotext for them, so they don't get two.</div>
+        <div id="reminder-live-note" class="hidden" style="font-size:11.5px;color:var(--care);margin-top:4px">Texts aren't sending yet — save the time now and reminders start automatically once texting is set up.</div>
+        <div style="display:flex;gap:18px;align-items:center;margin-top:12px">
+          <button class="save-btn" style="width:auto;padding:9px 24px" onclick="saveReminder()">Save</button>
+          <div style="font-size:13px;color:var(--ink-dim);cursor:pointer" onclick="clearReminder()">Clear</div>
+        </div>
       </div>
 
       <div id="link-modal" class="hidden" style="position:fixed;inset:0;background:rgba(20,32,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px" onclick="if(event.target===this)closeClientLinkModal()">
@@ -815,6 +833,7 @@ async function init(){
   renderAssigned();
   renderStatsTab();
   renderAdminOrgAccess();
+  renderReminder();
 }
 
 function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : type === 'choice' ? '☰' : '#'; }
@@ -1298,6 +1317,78 @@ function renderAdminOrgAccess(){
 function toggleAdminOrgPanel(){
   adminOrgPanelOpen = !adminOrgPanelOpen;
   renderAdminOrgAccess();
+}
+
+// ---- Daily reminder text ------------------------------------------------
+// When (if at all) Did Today texts this client their own check-in link. The
+// sender only texts on a day they haven't logged yet and have a did scheduled,
+// at most once a day, one-way (no replies expected). Off by default — a trainer
+// flips it on once they've turned off their own autotext, so nobody gets two.
+const REMINDERS_LIVE = false; // flip to true once the TextIt sender is running
+let reminderPanelOpen = false;
+let pendingReminderEnabled = false;
+
+function fmtReminderTime(t){
+  if(!t) return '';
+  const [h, m] = String(t).split(':').map(Number);
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+
+function renderReminder(){
+  const t = CLIENT.reminder_time;
+  document.getElementById('reminder-link').textContent = !t
+    ? '⏰ Set reminder time'
+    : `⏰ Reminder ${fmtReminderTime(t)}${CLIENT.reminder_enabled ? '' : ' (off)'}`;
+  document.getElementById('reminder-panel').classList.toggle('hidden', !reminderPanelOpen);
+  document.getElementById('reminder-live-note').classList.toggle('hidden', REMINDERS_LIVE);
+  renderReminderToggle();
+}
+
+function renderReminderToggle(){
+  const box = document.getElementById('reminder-enabled-box');
+  box.style.background = pendingReminderEnabled ? 'var(--teal)' : 'var(--bg)';
+  box.innerHTML = pendingReminderEnabled ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '';
+}
+
+function toggleReminderPanel(){
+  reminderPanelOpen = !reminderPanelOpen;
+  if(reminderPanelOpen){
+    // Start from what's saved — and if nothing is saved yet, turn "send" on by
+    // default for convenience once they pick a time.
+    document.getElementById('reminder-time-input').value = CLIENT.reminder_time ? String(CLIENT.reminder_time).slice(0,5) : '';
+    pendingReminderEnabled = CLIENT.reminder_time ? !!CLIENT.reminder_enabled : true;
+  }
+  renderReminder();
+}
+
+function toggleReminderEnabled(){
+  pendingReminderEnabled = !pendingReminderEnabled;
+  renderReminderToggle();
+}
+
+async function saveReminder(){
+  const val = document.getElementById('reminder-time-input').value; // "HH:MM", or "" when blank
+  if(pendingReminderEnabled && !val){ showToast('✗ Pick a time first'); return; }
+  const body = { reminder_time: val || null, reminder_enabled: val ? pendingReminderEnabled : false };
+  try {
+    await sbReq(`checkin_clients?id=eq.${CLIENT.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify(body)});
+  } catch(e){
+    showToast('✗ Could not save the reminder — try again');
+    return;
+  }
+  CLIENT.reminder_time = body.reminder_time;
+  CLIENT.reminder_enabled = body.reminder_enabled;
+  reminderPanelOpen = false;
+  renderReminder();
+  showToast(body.reminder_time
+    ? `✓ Reminder set for ${fmtReminderTime(body.reminder_time)}${body.reminder_enabled ? '' : ' (off for now)'}`
+    : '✓ Reminder cleared');
+}
+
+function clearReminder(){
+  document.getElementById('reminder-time-input').value = '';
+  pendingReminderEnabled = false;
+  saveReminder();
 }
 
 async function toggleClientOrgAccess(orgId){
