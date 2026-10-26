@@ -212,6 +212,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="openChangeTrainer()">↔️ Change trainer</div>
         <div id="admin-org-link" class="hidden" style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="toggleAdminOrgPanel()">🏢 Org access</div>
         <div id="reminder-link" style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="toggleReminderPanel()">⏰ Set reminder time</div>
+        <div id="report-link" style="font-size:13px;font-weight:600;color:var(--teal-deep);cursor:pointer" onclick="toggleReportPanel()">📧 Monthly report</div>
         <div style="font-size:13px;font-weight:600;color:var(--care);cursor:pointer" onclick="startArchiveClient()">🗄️ Archive this client</div>
       </div>
 
@@ -236,6 +237,19 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div style="display:flex;gap:18px;align-items:center;margin-top:12px">
           <button class="save-btn" style="width:auto;padding:9px 24px" onclick="saveReminder()">Save</button>
           <div style="font-size:13px;color:var(--ink-dim);cursor:pointer" onclick="clearReminder()">Clear</div>
+        </div>
+      </div>
+
+      <div id="report-panel" class="hidden" style="margin:-8px 0 18px;padding:12px 14px;background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px">
+        <div style="font-size:12px;color:var(--ink-faint);margin-bottom:10px">On the 1st of each month: last month, day by day. Emailed if there's an email below, plus a text with the link if they've agreed to Dids Today texts. Replies come to their trainer.</div>
+        <input type="email" id="report-email-input" placeholder="their@email.com" autocomplete="off" oninput="renderReportToggle()" style="width:100%;max-width:320px;box-sizing:border-box;background:var(--bg);border:1.5px solid var(--surface-soft);border-radius:10px;padding:9px 12px;font-family:'DM Sans',sans-serif;font-size:15px;color:var(--ink);outline:none">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:12px" onclick="event.preventDefault(); toggleReportEnabled()">
+          <div id="report-enabled-box" style="width:18px;height:18px;border-radius:5px;border:1.5px solid var(--surface-soft);background:var(--bg);display:flex;align-items:center;justify-content:center;flex-shrink:0"></div>
+          <span style="font-size:13px;color:var(--ink)">Send the monthly report</span>
+        </label>
+        <div id="report-reach-note" class="hidden" style="font-size:11.5px;color:var(--care);margin-top:8px"></div>
+        <div style="display:flex;gap:18px;align-items:center;margin-top:12px">
+          <button class="save-btn" style="width:auto;padding:9px 24px" onclick="saveReport()">Save</button>
         </div>
       </div>
 
@@ -839,6 +853,7 @@ async function init(){
   renderStatsTab();
   renderAdminOrgAccess();
   renderReminder();
+  renderReport();
 }
 
 function typeIcon(type){ return type === 'yesno' ? '✓' : type === 'reflection' ? '💬' : type === 'choice' ? '☰' : '#'; }
@@ -1377,6 +1392,7 @@ function renderReminderToggle(){
 function toggleReminderPanel(){
   reminderPanelOpen = !reminderPanelOpen;
   if(reminderPanelOpen){
+    if(reportPanelOpen){ reportPanelOpen = false; renderReport(); }
     // Start from what's saved — and if nothing is saved yet, turn "send" on by
     // default for convenience once they pick a time.
     document.getElementById('reminder-time-input').value = CLIENT.reminder_time ? String(CLIENT.reminder_time).slice(0,5) : '';
@@ -1419,6 +1435,67 @@ function clearReminder(){
   pendingReminderEnabled = false;
   pendingReminderDays = [...REMINDER_DAY_LIST];
   saveReminder();
+}
+
+// ---- Monthly report (sent by dids-reminders on the 1st) --------------------
+let reportPanelOpen = false;
+let pendingReportEnabled = false;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function renderReport(){
+  const on = !!CLIENT.monthly_report, email = (CLIENT.email || '').trim();
+  document.getElementById('report-link').textContent = on
+    ? `📧 Monthly report on${email ? '' : ' · text only'}`
+    : '📧 Monthly report';
+  document.getElementById('report-panel').classList.toggle('hidden', !reportPanelOpen);
+  renderReportToggle();
+}
+
+function renderReportToggle(){
+  const box = document.getElementById('report-enabled-box');
+  box.style.background = pendingReportEnabled ? 'var(--teal)' : 'var(--bg)';
+  box.innerHTML = pendingReportEnabled ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '';
+  // Say plainly when it won't reach them
+  const note = document.getElementById('report-reach-note');
+  const email = document.getElementById('report-email-input').value.trim();
+  const texts = CLIENT.textit_status === 'agreed';
+  let msg = '';
+  if(pendingReportEnabled && !email && !texts) msg = "No email, and they haven't agreed to Dids Today texts yet, so this won't reach them. Add an email.";
+  else if(pendingReportEnabled && !email) msg = "No email, so they'll just get the text with the link.";
+  note.textContent = msg;
+  note.classList.toggle('hidden', !msg);
+}
+
+function toggleReportPanel(){
+  reportPanelOpen = !reportPanelOpen;
+  if(reportPanelOpen){
+    if(reminderPanelOpen){ reminderPanelOpen = false; renderReminder(); }
+    document.getElementById('report-email-input').value = CLIENT.email || '';
+    pendingReportEnabled = !!CLIENT.monthly_report;
+  }
+  renderReport();
+}
+
+function toggleReportEnabled(){
+  pendingReportEnabled = !pendingReportEnabled;
+  renderReportToggle();
+}
+
+async function saveReport(){
+  const email = document.getElementById('report-email-input').value.trim();
+  if(email && !EMAIL_RE.test(email)){ showToast("✗ That email doesn't look right"); return; }
+  const body = { email: email || null, monthly_report: pendingReportEnabled };
+  try {
+    await sbReq(`checkin_clients?id=eq.${CLIENT.id}`, {method:'PATCH', headers:{Prefer:'return=minimal'}, body: JSON.stringify(body)});
+  } catch(e){
+    showToast('✗ Could not save — try again');
+    return;
+  }
+  CLIENT.email = body.email;
+  CLIENT.monthly_report = body.monthly_report;
+  reportPanelOpen = false;
+  renderReport();
+  showToast(body.monthly_report ? `✓ Monthly report on${body.email ? ' — emails go to ' + body.email : ' — text only'}` : '✓ Monthly report off');
 }
 
 async function toggleClientOrgAccess(orgId){
