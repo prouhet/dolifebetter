@@ -95,6 +95,26 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 .footer-word{display:flex;flex-direction:column;justify-content:center}
 .footer-name{font-size:12.5px;font-weight:700;letter-spacing:-.01em;color:var(--ink-dim)}
 .footer-sub{font-size:8.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);margin-top:2px}
+
+/* Day by day */
+.range-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.range-chip{padding:7px 13px;border-radius:100px;border:1.5px solid var(--surface-soft);background:var(--surface);color:var(--ink-dim);
+  font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:600;cursor:pointer}
+.range-chip.active{border-color:var(--teal);background:var(--teal-tint);color:var(--teal-deep)}
+.days-summary{font-size:12.5px;color:var(--ink-dim);line-height:1.65;margin-bottom:12px}
+.days-summary b{color:var(--teal-deep);font-weight:700}
+.day-row{border-radius:14px;background:var(--surface);border:1px solid var(--surface-soft);box-shadow:var(--shadow-sm);padding:11px 14px;margin-bottom:8px}
+.day-row.missed{background:transparent;box-shadow:none;border-style:dashed}
+.day-date{font-size:12.5px;font-weight:700;margin-bottom:5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.day-row.missed .day-date{margin-bottom:2px;color:var(--ink-dim)}
+.day-tag{font-size:10.5px;font-weight:600;color:var(--amber);background:var(--amber-tint);padding:1px 7px;border-radius:100px}
+.day-item{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:13px;line-height:1.45;padding:2px 0}
+.day-item-name{color:var(--ink-dim)}
+.day-item-val{font-weight:600;text-align:right;white-space:nowrap}
+.day-item-val.dim{color:var(--ink-faint);font-weight:500}
+.day-note{font-size:12.5px;color:var(--ink-dim);line-height:1.5;padding:3px 0 1px;overflow-wrap:anywhere}
+.day-note i{color:var(--ink)}
+.day-missed{font-size:12.5px;color:var(--ink-faint)}
 </style>
 </head>
 <body>
@@ -128,6 +148,13 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;background:ra
 
     <div id="stats-list"></div>
     <div id="stats-empty" class="empty-state hidden">Nothing being tracked right now — check with your trainer if that doesn't seem right.</div>
+
+    <div id="days-section" class="hidden">
+      <div class="cat-header">📅 Day by day</div>
+      <div class="range-chips" id="days-range"></div>
+      <div class="days-summary" id="days-summary"></div>
+      <div id="days-list"></div>
+    </div>
 
     <div id="archived-section" class="hidden">
       <div class="cat-header">No longer tracking</div>
@@ -333,6 +360,8 @@ async function continueAfterVerify(){
 
   renderStats(assignRows, responseRows);
   renderArchivedItems(archivedRows, archivedResponseRows);
+  ALL_ASSIGNS = [...assignRows, ...archivedRows].filter(a => a.checkin_library_items);
+  initDayByDay();
   showScreen('screen-stats');
 }
 
@@ -482,6 +511,157 @@ function renderStats(assignRows, responseRows){
       </div>
     </div>
   `).join('');
+}
+
+// ─── Day by day ───────────────────────────────────────────────────────────
+// Every day in the chosen range, newest first, with what was actually logged.
+// The monthly report text links here with ?month=YYYY-MM, which adds that month
+// as a choice and opens on it.
+let ALL_ASSIGNS = [];   // current + ended dids, each with its library item
+let RANGE_OPTS = [];    // [{label, kind:'days', n} | {label, kind:'month', ym}]
+let currentRange = null;
+let daysLoadSeq = 0;
+
+function shiftISO(iso, n){ const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return localISO(d); }
+function monthLabel(ym){ const [y, m] = ym.split('-').map(Number); return new Date(y, m - 1, 15).toLocaleDateString('en-US', {month:'long', year:'numeric'}); }
+function rangeBounds(r){
+  const today = localISO(new Date());
+  if(r.kind === 'month'){
+    const [y, m] = r.ym.split('-').map(Number);
+    const last = localISO(new Date(y, m, 0)); // day 0 of next month = last day of this one
+    return { from: `${r.ym}-01`, to: last < today ? last : today };
+  }
+  return { from: shiftISO(today, -(r.n - 1)), to: today };
+}
+// More than 1000 rows (a long range, lots of dids) comes back in pages
+async function sbAll(path){
+  const out = [];
+  for(let offset = 0; offset < 20000; offset += 1000){
+    const page = (await sbReq(`${path}&order=id.asc&limit=1000&offset=${offset}`)) || [];
+    out.push(...page);
+    if(page.length < 1000) break;
+  }
+  return out;
+}
+
+function initDayByDay(){
+  if(!ALL_ASSIGNS.length) return;
+  const monthParam = params.get('month');
+  RANGE_OPTS = [14, 30, 90].map(n => ({ label: `${n} days`, kind: 'days', n }));
+  if(/^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam || '') && `${monthParam}-01` <= localISO(new Date())){
+    RANGE_OPTS.push({ label: monthLabel(monthParam), kind: 'month', ym: monthParam });
+    currentRange = RANGE_OPTS[RANGE_OPTS.length - 1];
+  } else currentRange = RANGE_OPTS[0];
+  document.getElementById('days-section').classList.remove('hidden');
+  renderRangeChips();
+  loadDays();
+  if(currentRange.kind === 'month') setTimeout(() => document.getElementById('days-section').scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+}
+
+function renderRangeChips(){
+  const box = document.getElementById('days-range');
+  box.innerHTML = RANGE_OPTS.map((r, i) => `<button class="range-chip${r === currentRange ? ' active' : ''}" data-i="${i}">${escapeHtml(r.label)}</button>`).join('');
+  box.querySelectorAll('.range-chip').forEach(btn => btn.onclick = () => {
+    currentRange = RANGE_OPTS[+btn.dataset.i];
+    renderRangeChips();
+    loadDays();
+  });
+}
+
+async function loadDays(){
+  const seq = ++daysLoadSeq; // a slower, older load never overwrites a newer one
+  const { from, to } = rangeBounds(currentRange);
+  const list = document.getElementById('days-list');
+  list.innerHTML = '<div class="day-missed" style="padding:10px 2px">Loading…</div>';
+  document.getElementById('days-summary').textContent = '';
+  let dailyRows, respRows;
+  try {
+    [dailyRows, respRows] = await Promise.all([
+      sbAll(`checkin_daily?select=id,checkin_date,is_backfilled,is_rest_day&client_id=eq.${CLIENT.id}&checkin_date=gte.${from}&checkin_date=lte.${to}`),
+      sbAll(`checkin_responses?select=id,library_item_id,value,checkin_daily!inner(checkin_date,client_id)&checkin_daily.client_id=eq.${CLIENT.id}&checkin_daily.checkin_date=gte.${from}&checkin_daily.checkin_date=lte.${to}`)
+    ]);
+  } catch(e){
+    if(seq === daysLoadSeq) list.innerHTML = '<div class="day-missed" style="padding:10px 2px">Couldn\'t load your days — check your connection and try again.</div>';
+    return;
+  }
+  if(seq !== daysLoadSeq) return;
+  renderDays(from, to, dailyRows, respRows);
+}
+
+function dayValue(item, v){
+  if(v === 'Rest day') return { text: 'Rest day', dim: true };
+  if(item.type === 'yesno') return v === 'yes' ? { text: '✓ Yes' } : v === 'no' ? { text: '✗ No', dim: true } : { text: v };
+  if(item.type === 'numeric') return { text: `${v}${item.unit ? ' ' + item.unit : ''}` };
+  return { text: v };
+}
+const roundNice = n => Math.abs(n) >= 100 ? Math.round(n) : Math.round(n * 10) / 10;
+
+function renderDays(from, to, dailyRows, respRows){
+  const list = document.getElementById('days-list');
+  const summary = document.getElementById('days-summary');
+  const today = localISO(new Date());
+  const assigns = ALL_ASSIGNS.filter(a => a.effective_from <= to && (!a.effective_to || a.effective_to >= from));
+  if(!assigns.length){ summary.textContent = ''; list.innerHTML = '<div class="day-missed" style="padding:10px 2px">Nothing was being tracked in this stretch.</div>'; return; }
+
+  // Days before they started tracking anything aren't "missed" — start the list there
+  const started = assigns.reduce((m, a) => a.effective_from < m ? a.effective_from : m, to);
+  const firstDay = started > from ? started : from;
+  const dates = [];
+  for(let d = to; d >= firstDay; d = shiftISO(d, -1)) dates.push(d);
+
+  const dayInfo = {}; dailyRows.forEach(r => { dayInfo[r.checkin_date] = r; });
+  const byDay = {};
+  respRows.forEach(r => { const d = r.checkin_daily && r.checkin_daily.checkin_date; if(d) (byDay[d] = byDay[d] || {})[r.library_item_id] = r.value; });
+
+  // One entry per did, in plan order (current first, then ended ones), with every span it was on the plan
+  const items = [];
+  assigns.forEach(a => {
+    let x = items.find(i => i.item.id === a.checkin_library_items.id);
+    if(!x){ x = { item: a.checkin_library_items, spans: [] }; items.push(x); }
+    x.spans.push(a);
+  });
+  const onPlan = (x, d) => x.spans.some(a => d >= a.effective_from && (!a.effective_to || d <= a.effective_to));
+
+  // Summary: days logged, then each number's average / low / high and each yes/no's count
+  const loggedDays = dates.filter(d => dayInfo[d] || byDay[d]).length;
+  const parts = [`Logged <b>${loggedDays}</b> of ${dates.length} day${dates.length === 1 ? '' : 's'}`];
+  items.forEach(x => {
+    const vals = dates.map(d => (byDay[d] || {})[x.item.id]).filter(v => v !== undefined && v !== 'Rest day');
+    if(x.item.type === 'numeric'){
+      const nums = vals.map(parseFloat).filter(n => !isNaN(n));
+      if(!nums.length) return;
+      const unit = x.item.unit ? ' ' + escapeHtml(x.item.unit) : '';
+      const goal = x.spans.find(a => !a.effective_to) || x.spans[0];
+      parts.push(`${escapeHtml(x.item.name)}: avg <b>${roundNice(nums.reduce((s, n) => s + n, 0) / nums.length)}${unit}</b> · low ${Math.min(...nums)} · high ${Math.max(...nums)}${goal && goal.goal != null ? ` · goal ${goal.goal}${unit}` : ''}`);
+    } else if(x.item.type === 'yesno'){
+      const days = dates.filter(d => onPlan(x, d)).length;
+      parts.push(`${escapeHtml(x.item.name)}: <b>${vals.filter(v => v === 'yes').length}</b> of ${days} days`);
+    }
+  });
+  summary.innerHTML = parts.join('<br>');
+
+  list.innerHTML = dates.map(d => {
+    const info = dayInfo[d], vals = byDay[d] || {};
+    const label = new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const tags = [];
+    if(d === today) tags.push('Today');
+    if(info && info.is_rest_day) tags.push('Rest day');
+    if(info && info.is_backfilled) tags.push('Logged later');
+    const head = `<div class="day-date">${label}${tags.map(t => ` <span class="day-tag">${t}</span>`).join('')}</div>`;
+    if(!info && !Object.keys(vals).length){
+      return `<div class="day-row missed">${head}<div class="day-missed">${d === today ? 'Not logged yet' : 'Not logged'}</div></div>`;
+    }
+    const lines = items.filter(x => onPlan(x, d) || vals[x.item.id] !== undefined).map(x => {
+      const v = vals[x.item.id];
+      if(x.item.type === 'reflection'){
+        return (v === undefined || String(v).trim() === '') ? '' : `<div class="day-note">${escapeHtml(x.item.name)}: <i>“${escapeHtml(v)}”</i></div>`;
+      }
+      if(v === undefined) return `<div class="day-item"><span class="day-item-name">${escapeHtml(x.item.name)}</span><span class="day-item-val dim">—</span></div>`;
+      const f = dayValue(x.item, v);
+      return `<div class="day-item"><span class="day-item-name">${escapeHtml(x.item.name)}</span><span class="day-item-val${f.dim ? ' dim' : ''}">${escapeHtml(f.text)}</span></div>`;
+    }).join('');
+    return `<div class="day-row">${head}${lines || '<div class="day-missed">Checked in</div>'}</div>`;
+  }).join('');
 }
 
 init();
