@@ -476,7 +476,7 @@ body.dark .toast{background:#E8EEF0;color:#14202A}
         <div class="trainer-select" id="new-client-org"></div>
       </div>
       <div class="field-block">
-        <div id="signup-reminder-note" class="hidden" style="font-size:13px;color:var(--teal-deep);background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:10px 12px;margin-bottom:12px"></div>
+        <div id="signup-reminder-note" class="hidden" style="white-space:pre-line;font-size:13px;color:var(--teal-deep);background:var(--surface);border:1px solid var(--surface-soft);border-radius:12px;padding:10px 12px;margin-bottom:12px"></div>
         <div class="field-label" id="new-client-dids-label">Starting dids <span style="font-weight:400;color:var(--ink-faint)">— optional, add more anytime</span></div>
         <div id="new-client-dids"></div>
         <div class="new-did-toggle" onclick="toggleNewDidForm()" id="new-did-toggle">+ Create a new did</div>
@@ -1090,6 +1090,10 @@ function completeSignup(id){
     remNote.textContent = "⏰ Didn't ask for reminder texts. You can turn them on later from their plan.";
     remNote.classList.remove('hidden');
   }
+  // Their monthly-report choice from signup — also carries over
+  remNote.textContent += s.monthly_report_opt_in && s.email
+    ? `\n📧 Asked for the monthly report, emailed to ${s.email}. It turns on when you add them.`
+    : '';
   document.getElementById('new-client-name').value = s.name;
   document.getElementById('new-client-phone').value = s.phone || '';
   document.querySelectorAll('#new-client-org .trainer-opt').forEach(o => o.classList.toggle('selected', o.dataset.oid === s.org_id));
@@ -1537,6 +1541,10 @@ async function _addClient(){
       // A signup that opted in to reminder texts keeps its time and days; everyone else starts off
       ...(pendingSignup && pendingSignup.reminder_opt_in && pendingSignup.reminder_time
         ? { reminder_time: pendingSignup.reminder_time, reminder_days: pendingSignup.reminder_days || null, reminder_enabled: true }
+        : {}),
+      // Same for the monthly report: their email and the report turned on
+      ...(pendingSignup && pendingSignup.monthly_report_opt_in && pendingSignup.email
+        ? { email: pendingSignup.email, monthly_report: true }
         : {})
     })});
     newClient = rows[0];
