@@ -243,6 +243,19 @@ input::placeholder{color:var(--ink-faint)}
       <div id="reminder-error" class="hidden" style="font-size:13px;color:var(--care);margin-top:10px"></div>
     </div>
 
+    <div class="field-block" style="background:var(--surface);border:1px solid var(--surface-soft);border-radius:14px;padding:16px;box-shadow:var(--shadow-sm);margin-top:14px">
+      <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
+        <input type="checkbox" id="report-optin" onchange="renderReportOptIn()" style="width:18px;height:18px;margin-top:2px;accent-color:var(--teal);flex-shrink:0">
+        <span style="font-size:13.5px;line-height:1.5;color:var(--ink)"><strong>Email me a monthly report</strong>: on the 1st, everything I logged the month before, day by day.</span>
+      </label>
+      <div id="report-fields" class="hidden" style="margin-top:14px">
+        <div class="field-label">Your email</div>
+        <input type="email" id="report-email" placeholder="you@email.com" autocomplete="email" inputmode="email" maxlength="254" style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1.5px solid var(--surface-soft);background:var(--bg);font-family:'DM Sans',sans-serif;font-size:15px;color:var(--ink);outline:none">
+        <div style="font-size:12px;color:var(--ink-faint);margin-top:8px">Only used for this report. You can stop it anytime.</div>
+      </div>
+      <div id="report-error" class="hidden" style="font-size:13px;color:var(--care);margin-top:10px"></div>
+    </div>
+
     <button class="cta" onclick="submitSignup()">Send to a Trainer</button>
   </div>
 
@@ -626,11 +639,34 @@ function reminderChoice(){
   return { ok: true, opt_in: true, time, days };
 }
 
+// ---- Monthly report email (optional, their own opt-in) ----
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function renderReportOptIn(){
+  const on = document.getElementById('report-optin').checked;
+  document.getElementById('report-fields').classList.toggle('hidden', !on);
+  document.getElementById('report-error').classList.add('hidden');
+  if(on) document.getElementById('report-email').focus();
+}
+function reportChoice(){
+  const on = document.getElementById('report-optin').checked;
+  if(!on) return { ok: true, opt_in: false, email: null };
+  const email = document.getElementById('report-email').value.trim();
+  if(!email) return { ok: false, error: 'Add your email for the report, or untick the box.' };
+  if(!EMAIL_RE.test(email)) return { ok: false, error: "That email doesn't look right." };
+  return { ok: true, opt_in: true, email };
+}
+
 async function submitSignup(){
   const reminder = reminderChoice();
   if(!reminder.ok){
     const el = document.getElementById('reminder-error');
     el.textContent = reminder.error; el.classList.remove('hidden');
+    return;
+  }
+  const report = reportChoice();
+  if(!report.ok){
+    const el = document.getElementById('report-error');
+    el.textContent = report.error; el.classList.remove('hidden');
     return;
   }
   const name = document.getElementById('signup-name').value.trim();
@@ -653,7 +689,8 @@ async function submitSignup(){
       name, phone, org_id: selectedOrgId, requested_item_ids: selectedDids.length ? selectedDids : null,
       requested_item_config: requestedItemConfig,
       preferred_trainer_id: selectedTrainerId, note, status: 'pending',
-      reminder_opt_in: reminder.opt_in, reminder_time: reminder.time, reminder_days: reminder.days
+      reminder_opt_in: reminder.opt_in, reminder_time: reminder.time, reminder_days: reminder.days,
+      monthly_report_opt_in: report.opt_in, email: report.email
     }) });
   } catch(e){
     // Older schema without one of the newer columns — fall back to the safe minimal payload
